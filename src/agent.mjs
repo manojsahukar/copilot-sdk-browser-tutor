@@ -13,7 +13,7 @@ import { DEMOS, DEMO_IDS } from "./demos.mjs";
 import { refreshGitHubToken } from "./appsecrets.mjs";
 import { buildProvider, OR_DEFAULT_MODEL, isAllowedModel } from "./openrouter.mjs";
 
-const ALLOWED_TOOLS = new Set(["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo"]);
+const ALLOWED_TOOLS = new Set(["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo", "suggest_followups"]);
 export { ALLOWED_TOOLS };
 
 const BASE_DIR = process.env.COPILOT_HOME_DIR || path.join(os.tmpdir(), "browser-tutor-copilot");
@@ -75,6 +75,24 @@ export function wrapTool(name, fn) {
   };
 }
 
+// Follow-up suggestion chips come from the model via a structured tool, NOT from the visible answer text.
+// Harden them server-side: plain text only, no URLs/HTML/Markdown/control chars, <=80 chars, <=4, de-duped.
+export function validateFollowups(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (let s of arr) {
+    if (typeof s !== "string") continue;
+    s = s.replace(CTRL, " ").replace(/\s+/g, " ").trim();
+    if (!s) continue;
+    if (/https?:\/\/|www\.|javascript:|data:|vbscript:|[<>]/i.test(s)) continue; // no URLs, schemes or HTML
+    s = s.replace(/[*_`#|~\[\]]/g, "").trim();                                      // strip Markdown-ish chars
+    s = s.slice(0, 80).trim();
+    if (s && !out.some((x) => x.toLowerCase() === s.toLowerCase())) out.push(s);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
 function tools(ctx) {
   const defs = [
     {
@@ -108,6 +126,15 @@ function tools(ctx) {
         if (!meta) return { error: "unknown demo", valid: DEMO_IDS };
         const result = ctx.demoResults && ctx.demoResults[demo];
         return { ...meta, lastRunResult: result || null, ranByUser: !!result, hint: result ? undefined : "Not run yet. Ask the user to open the Demos page and tap Run on this demo; results are metadata only." };
+      },
+    },
+    {
+      name: "suggest_followups",
+      description: "Call this ONCE at the very end of your reply to offer 2-4 short follow-up questions the user might tap next. Each must be a plain-text question under 80 characters, no URLs, no Markdown. These are shown as tappable chips, NOT printed in your answer. Prefer questions that lead to a demo the user has not run yet (e.g. storage_inspector, camera) or the next gotcha.",
+      parameters: { type: "object", properties: { suggestions: { type: "array", items: { type: "string" }, description: "2-4 short plain-text follow-up questions." } }, required: ["suggestions"] },
+      handler: async ({ suggestions } = {}) => {
+        ctx.followups = validateFollowups(suggestions);
+        return { accepted: ctx.followups.length };
       },
     },
   ];
@@ -172,12 +199,13 @@ export async function getAgent(sess, devBypass) {
   return a;
 }
 
-export async function runTurn(a, { message, fingerprint, demoResults, history, serverView, emit }) {
+export async function runTurn(a, { message, fingerprint, demoResults, history, serverView, emit, deadlineMs = 42000 }) {
   if (a.busy) throw new Error("Still answering your previous message");
   a.busy = true;
   if (fingerprint) a.ctx.fingerprint = fingerprint;
   if (demoResults) a.ctx.demoResults = { ...a.ctx.demoResults, ...demoResults };
   a.ctx.serverView = serverView;
+  a.ctx.followups = [];
   let prompt = message;
   if (a.fresh && history.length) {
     const t = history.map((m) => `${m.role === "user" ? "User" : "Tutor"}: ${String(m.text || "").slice(0, 1500)}`).join("\n");
@@ -185,16 +213,30 @@ export async function runTurn(a, { message, fingerprint, demoResults, history, s
   }
   a.fresh = false;
   const offs = [];
+  const finalParts = [];
+  let timer;
   try {
     await new Promise((resolve, reject) => {
       const s = a.session;
       offs.push(s.on("assistant.message_delta", (e) => emit({ type: "delta", text: e.data.deltaContent })));
+      // The authoritative final message(s). A mid-stream provider 429 makes the runtime re-stream deltas, so the
+      // delta accumulation can contain a duplicate; we use these to REPLACE it and de-duplicate deterministically.
+      offs.push(s.on("assistant.message", (e) => { const c = e?.data?.content; if (typeof c === "string" && c.trim()) finalParts.push(c); }));
       offs.push(s.on("tool.execution_start", (e) => emit({ type: "tool", name: e.data.toolName || e.data.mcpToolName || "tool" })));
       offs.push(s.on("session.error", (e) => reject(new Error(e.data?.message || "Copilot session error"))));
       offs.push(s.on("session.idle", () => resolve()));
+      // Deadline: the bundled runtime retries provider 429s internally for ~60s, which exceeds CloudFront's 60s
+      // origin read timeout and would cut the SSE stream (client "network error"). Fail fast with a clean error.
+      timer = setTimeout(() => { const e = new Error("turn deadline exceeded (model too slow / rate limited)"); e.code = "DEADLINE"; reject(e); }, deadlineMs);
       s.send({ prompt }).catch(reject);
     });
+    if (finalParts.length) emit({ type: "final", text: finalParts.join("\n\n") });
+    if (a.ctx.followups && a.ctx.followups.length) emit({ type: "followups", items: a.ctx.followups });
+  } catch (e) {
+    if (e && e.code === "DEADLINE") { try { await a.session.abort(); } catch {} }
+    throw e;
   } finally {
+    clearTimeout(timer);
     offs.forEach((off) => typeof off === "function" && off());
     a.busy = false;
   }

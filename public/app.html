@@ -25,14 +25,30 @@
   </div>
 </section>
 <section id="chat" class="panel chat" hidden>
-  <div id="log" aria-live="polite"><div class="msg bot">Hi! Ask me things like <em>“What does my user agent reveal?”</em>, <em>“How unique am I?”</em> or <em>“Walk me through everything you can see, worst first.”</em></div></div>
+  <div id="log" aria-live="polite">
+    <div class="intro">
+      <p class="intro-line">👋 I can explain anything your browser reveals. Tap a suggestion below or type your own.</p>
+    </div>
+  </div>
   <button id="jump" class="jump" hidden aria-label="Scroll to latest">↓ Latest</button>
+  <div id="chips" class="chiprow" role="list" aria-label="Suggested questions"></div>
   <div class="composer">
-    <div id="provider" class="provider" aria-label="Model engine"></div>
-    <p class="muted" id="fpNote"></p>
-    <form id="form"><textarea id="q" rows="1" autocomplete="off" enterkeyhint="send" placeholder="Ask about your browser…" maxlength="4000" aria-label="Message"></textarea><button class="btn">Send</button></form>
+    <button id="engineChip" class="engine-chip" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="engineChipText">Copilot</span> <span class="caret">▾</span></button>
+    <form id="form"><textarea id="q" rows="1" autocomplete="off" enterkeyhint="send" placeholder="Ask about your browser…" maxlength="4000" aria-label="Message"></textarea><button class="btn" id="sendBtn">Send</button></form>
   </div>
 </section>
 </main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- Engine / model bottom sheet (opened by the engine chip) -->
+<div id="sheetBackdrop" class="sheet-backdrop" hidden></div>
+<div id="engineSheet" class="sheet" role="dialog" aria-modal="true" aria-label="Model engine" hidden>
+  <div class="sheet-handle" aria-hidden="true"></div>
+  <div class="sheet-head"><h2>Model engine</h2><button id="sheetClose" class="link" aria-label="Close">Done</button></div>
+  <div id="sheetBody" class="sheet-body"></div>
+</div>
+
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
 <script src="/static/render.js"></script><script src="/static/probe.js"></script><script src="/static/chat.js"></script>
 </body></html>

@@ -18,17 +18,21 @@ export const OR_KEY_RE = /sk-or-[A-Za-z0-9._-]+/g;
 // This list was filtered from the live GET https://openrouter.ai/api/v1/models (supported_parameters includes
 // "tools" and pricing is free). Override with OPENROUTER_MODELS / OPENROUTER_DEFAULT_MODEL if OpenRouter's
 // free line-up changes. All are ":free" (or the free auto-router), so the default costs the user nothing.
+// All support tool calling (verified against the live GET /api/v1/models). "openrouter/auto" is OpenRouter's
+// router: it picks a model per request and MAY route to PAID models (pricing is dynamic), so it can bill the
+// user's credits. The ":free" / free-router entries cost nothing. The default is Auto for reliability (it avoids
+// the shared free-pool 429s), with an honest paid-routing note shown in the UI.
 const CURATED = [
-  { id: "google/gemma-4-31b-it:free", label: "Gemma 4 31B · free" },
-  { id: "google/gemma-4-26b-a4b-it:free", label: "Gemma 4 26B · free" },
-  { id: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super 120B · free" },
-  { id: "nvidia/nemotron-3.5-super-vl:free", label: "Nemotron 3.5 Super VL · free" },
-  { id: "openrouter/free", label: "Auto (free models) · free" },
+  { id: "openrouter/auto", label: "Auto (best available)", free: false, note: "May route to paid models and bill your OpenRouter credits." },
+  { id: "openrouter/free", label: "Auto (free models only)", free: true, note: "Only free models. No charge, but the shared free pool is often rate-limited." },
+  { id: "google/gemma-4-31b-it:free", label: "Gemma 4 31B", free: true, note: "Free. Shared free pool; may be rate-limited." },
+  { id: "google/gemma-4-26b-a4b-it:free", label: "Gemma 4 26B", free: true, note: "Free. Shared free pool; may be rate-limited." },
+  { id: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super 120B", free: true, note: "Free. Shared free pool; may be rate-limited." },
 ];
 export const OR_MODELS = (() => {
   const env = (process.env.OPENROUTER_MODELS || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!env.length) return CURATED;
-  return env.map((id) => ({ id, label: id }));
+  return env.map((id) => ({ id, label: id, free: /:free$|\/free$/.test(id), note: "" }));
 })();
 export const OR_DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || OR_MODELS[0].id;
 const ALLOWED_MODELS = new Set(OR_MODELS.map((m) => m.id));

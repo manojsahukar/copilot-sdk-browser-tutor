@@ -4,7 +4,7 @@ A small, security-focused web app: **sign in with GitHub → see exactly what yo
 website** (HTTP headers *and* JavaScript APIs) → **chat with a [GitHub Copilot SDK](https://github.com/github/copilot-sdk)
 agent** that explains each signal, how it is used for tracking and fingerprinting, what a curious or malicious site
 could do with it, and how to defend yourself. There are also **live, tap-to-run permission demos** (camera, mic,
-geolocation, cookies, cross-site requests) and an **"Agent SDK gotchas"** lesson about safely building agents like this one.
+geolocation, cookies, cross-site requests, and a **storage inspector** that shows where your chat is saved) and an **"Agent SDK gotchas"** lesson about safely building agents like this one.
 
 After signing in you pick a **model engine**: **GitHub Copilot** (runs on *your* Copilot subscription) or **OpenRouter** (runs on
 *your* OpenRouter credits via OAuth PKCE — so a user **without** Copilot can still use the tutor, and the operator never pays for
@@ -32,6 +32,10 @@ only metadata back to the tutor.
 - **Active signals** JavaScript can read: screen, timezone, languages, canvas/WebGL hashes, fonts, media-device counts, permission states.
 - **Permissioned capabilities** via the live demos: camera, microphone, geolocation (all local-only; only metadata is reported),
   and **cross-site behaviour** against a genuinely separate "sibling" origin (CORS vs no-CORS reads, and a shared-parent cookie).
+- **Where your data lives in the browser**: a `storage_inspector` demo shows this site's own localStorage (including the saved chat
+  transcript — key name, size, message count, expiry), sessionStorage, IndexedDB and the JS-visible cookies (the HttpOnly `bt_sess`
+  session cookie is deliberately absent), plus quota via `navigator.storage.estimate()` — and explains cookies vs Web Storage, origin
+  scope, and eviction. Only metadata is shared with the tutor, never content.
 - **How to defend**: browser choice/settings, resistFingerprinting, 3rd-party-cookie blocking, GPC, permission hygiene, and the trade-offs.
 
 ## Architecture
@@ -64,11 +68,14 @@ Browser ──HTTPS──> CloudFront ──(X-Origin-Verify secret header)─�
 ## Security notes
 
 This project is itself a worked example of building an agent safely. The **[`/gotchas`](https://copilot-sdk.demo.curiosta.com/gotchas)**
-page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 14 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
+page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 15 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
 Accepted / Needs human) and a pointer to the code that handles each. Highlights:
 
 - **No model-generated JavaScript.** The model only returns text; live demos use a `run_demo` **enum** that maps a demo *name*
-  to pre-written, reviewed client code. Markdown is escaped first and can't emit raw HTML or `javascript:` links; CSP is
+  to pre-written, reviewed client code. Model Markdown is rendered with a vendored, self-hosted parser (`marked`) and sanitized with
+  `DOMPurify` (served from `/static`): raw HTML, `<script>`, `<img onerror>` and `javascript:`/`data:` links are stripped and links are
+  forced to http/https with `rel=noopener noreferrer`. Suggested-question chips come from a structured `suggest_followups` tool and are
+  rendered as `textContent` only. CSP is
   `script-src 'self'` with no `unsafe-inline`/`unsafe-eval`.
 - **Prompt-injection defence.** Every tool result is wrapped in `<<<BEGIN_UNTRUSTED_DATA>>> … <<<END_UNTRUSTED_DATA>>>` markers,
   length-capped and control-char-stripped, and the system prompt treats anything inside as data, never instructions. Tools are
@@ -82,7 +89,7 @@ Accepted / Needs human) and a pointer to the code that handles each. Highlights:
 - **Deny-by-default permissions** and **secret masking** (cookies, tokens, the origin secret, `sk-or-` keys never reach the model or logs).
 - **User-paid keys handled as credentials (OpenRouter).** The `sk-or-` key lives only in the encrypted cookie; it is never logged
   (the scrubber redacts `sk-or-` too), never sent to the model or client JS, and a Disconnect action drops it and links the user to revoke it.
-  The base URL is a hard-coded constant (no user-supplied base URL → no SSRF); the default model is a free `:free` tool-calling model,
+  The base URL is a hard-coded constant (no user-supplied base URL → no SSRF); the default model is OpenRouter's **Auto** router (`openrouter/auto`), which may route to paid models (shown as an honest note in the picker) — free `:free` tool-calling models are one tap away,
   and the UI deep-links the user to set a spending limit. Consumer-subscription logins (ChatGPT, Claude.ai) are deliberately **not**
   offered server-side; OpenRouter's user-owned-key OAuth is the sanctioned "user pays" path.
 
@@ -100,7 +107,7 @@ server-side at `https://openrouter.ai/api/v1/auth/keys`, and stores the resultin
 encrypted session cookie. There is **no client secret and no extra AWS secret** (PKCE needs none). GitHub sign-in stays the
 identity gate (`ALLOWED_LOGINS`); OpenRouter is a *model-provider connection*, not a standalone login — making it standalone
 would bypass the allow-list and open the app to anyone with an OpenRouter account. Default model is a free, tool-calling
-`:free` model; a small curated list is offered because tool calling is required.
+`openrouter/auto` router by default (with a clear paid-routing note); the curated list keeps free `:free` models one tap away because tool calling is required.
 
 
 ## Run locally
@@ -125,6 +132,7 @@ npm run dev              # then open http://localhost:8080 and "Continue without
 node scripts/unit-tests.mjs        # mode:"empty" assertion + deny-by-default permission handler
 node scripts/injection-tests.mjs   # prompt-injection vectors (UA, Referer, cookie name) are neutralised; secret masking
 node scripts/openrouter-e2e.mjs    # mocked OpenRouter PKCE: login params, state rejection, exchange, key never exposed, disconnect
+node scripts/markdown-xss.mjs      # model output with <script>/<img onerror>/javascript: links is neutralised (marked + DOMPurify)
 node scripts/e2e-mobile.mjs        # responsive checks at 360/390/768/1280 (needs: npm i --no-save puppeteer-core@23)
 ```
 

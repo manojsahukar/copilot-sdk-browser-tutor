@@ -8,6 +8,58 @@
   const out = (id, html, cls = "") => { const el = document.getElementById("out-" + id); el.innerHTML = html; el.className = "demo-out " + cls; };
 
   const RUNNERS = {
+    async storage_inspector(id) {
+      const bytes = (str) => { try { return new Blob([str]).size; } catch { return (str || "").length; } };
+      const fmt = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB";
+      const mask = (v) => { v = String(v); return v.length <= 2 ? "\u2022\u2022" : v[0] + "\u2022".repeat(Math.min(12, v.length - 2)) + v[v.length - 1] + " (" + v.length + " chars)"; };
+      // ----- localStorage (this is where the tutor keeps your chat transcript) -----
+      const ls = [];
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); const val = localStorage.getItem(k) || ""; ls.push({ k, size: bytes(k + val), val }); }
+      let chatMeta = null, chatPreview = "";
+      const chatEntry = ls.find((e) => e.k === "bt_chat");
+      if (chatEntry) { try { const o = JSON.parse(chatEntry.val); const msgs = Array.isArray(o.messages) ? o.messages : []; chatMeta = { messages: msgs.length, savedAt: o.savedAt ? new Date(o.savedAt).toLocaleString() : "?", expiresAt: o.expiresAt ? new Date(o.expiresAt).toLocaleString() : "?" }; const first = msgs[0]; if (first) chatPreview = (first.role || "?") + ": " + String(first.text || "").slice(0, 80); } catch {} }
+      // ----- sessionStorage -----
+      const ss = [];
+      for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); const val = sessionStorage.getItem(k) || ""; ss.push({ k, size: bytes(k + val) }); }
+      // ----- IndexedDB -----
+      let idb = [];
+      try { if (indexedDB.databases) idb = (await indexedDB.databases()).map((d) => d.name).filter(Boolean); } catch {}
+      // ----- cookies visible to JS (HttpOnly ones like bt_sess are deliberately absent) -----
+      const cookies = (document.cookie || "").split(";").map((c) => c.trim()).filter(Boolean).map((c) => { const eq = c.indexOf("="); return { name: eq < 0 ? c : c.slice(0, eq), value: eq < 0 ? "" : c.slice(eq + 1) }; });
+      // ----- quota / persistence -----
+      let quota = null;
+      try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); let persisted = null; try { persisted = await navigator.storage.persisted(); } catch {} quota = { usage: e.usage || 0, quota: e.quota || 0, persisted }; } } catch {}
+
+      // METADATA ONLY to the tutor: names, sizes, counts, quota. Never content, previews or cookie values.
+      saveResult(id, {
+        localStorageKeys: ls.map((e) => ({ name: e.k, bytes: e.size })),
+        chatHistory: chatMeta,
+        sessionStorageKeys: ss.map((e) => ({ name: e.k, bytes: e.size })),
+        indexedDbDatabases: idb,
+        jsVisibleCookieNames: cookies.map((c) => c.name),
+        httpOnlyCookiesHiddenFromJs: true,
+        quotaBytes: quota && quota.quota, usageBytes: quota && quota.usage, persisted: quota && quota.persisted,
+      });
+
+      const cell = (title, inner) => `<div class="stor-cell"><h4>${esc(title)}</h4>${inner}</div>`;
+      const lsInner = ls.length ? `<table class="stor-tbl"><tr><th>key</th><th>size</th></tr>${ls.map((e) => `<tr><td>${esc(e.k)}</td><td>${fmt(e.size)}</td></tr>`).join("")}</table>` +
+        (chatMeta ? `<p class="kv"><b>bt_chat</b> = your chat transcript: ${chatMeta.messages} messages, saved ${esc(chatMeta.savedAt)}, expires ${esc(chatMeta.expiresAt)}.<br>First entry preview (shown only to you): <code>${esc(chatPreview || "(empty)")}</code></p>` : `<p class="kv muted">No saved chat yet \u2014 send a message in Ask tutor, then re-run.</p>`)
+        : `<p class="kv muted">empty</p>`;
+      const ssInner = ss.length ? `<table class="stor-tbl"><tr><th>key</th><th>size</th></tr>${ss.map((e) => `<tr><td>${esc(e.k)}</td><td>${fmt(e.size)}</td></tr>`).join("")}</table>` : `<p class="kv muted">empty (per-tab; cleared when this tab closes)</p>`;
+      const idbInner = idb.length ? `<ul class="kv">${idb.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : `<p class="kv muted">no databases</p>`;
+      const ckInner = cookies.length ? `<table class="stor-tbl"><tr><th>name</th><th>value (masked)</th></tr>${cookies.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(mask(c.value))}</td></tr>`).join("")}</table>` : `<p class="kv muted">none readable by JS</p>`;
+      const qInner = quota ? `<p class="kv">Using <b>${fmt(quota.usage)}</b> of ~<b>${fmt(quota.quota)}</b> quota.<br>Durable (persisted): <b>${quota.persisted === null ? "unknown" : quota.persisted}</b></p>` : `<p class="kv muted">Storage estimate not available in this browser.</p>`;
+
+      const el = document.getElementById("out-" + id); el.className = "demo-out ok";
+      el.innerHTML =
+        `<div class="stor-grid">${cell("localStorage (stays in browser)", lsInner)}${cell("sessionStorage (per tab)", ssInner)}${cell("IndexedDB", idbInner)}${cell("Cookies visible to JS", ckInner)}${cell("Quota & persistence", qInner)}</div>` +
+        `<p class="kv"><b>The lesson:</b> your chat is kept in <code>localStorage</code> on <b>${esc(location.hostname)}</b> \u2014 any JavaScript on this origin (or a browser extension) can read it, and one XSS would leak it. The <code>bt_sess</code> session cookie is <b>HttpOnly</b>, so it is missing from the cookie list above on purpose: JS cannot read it. <code>sibling.demo.curiosta.com</code> can\u2019t read this localStorage at all (Web Storage is origin-scoped) even though it does receive the parent-domain demo cookie. Only key names, sizes, counts and quota were shared with the tutor \u2014 never the content.</p>` +
+        `<div class="demo-run"><button class="btn secondary" id="clr-${id}">Clear this site\u2019s stored data</button></div>`;
+      document.getElementById("clr-" + id).onclick = () => {
+        try { localStorage.removeItem("bt_chat"); sessionStorage.removeItem("bt_demo"); } catch {}
+        out(id, "Cleared this site\u2019s chat history and demo results from your browser. Re-run to confirm.", "ok");
+      };
+    },
     async camera(id) {
       out(id, "Requesting camera… (allow the prompt)");
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -91,6 +143,7 @@
           <p>${esc(d.what)}</p>
           <h3>What a site learns</h3><p>${esc(d.siteLearns)}</p>
           <h3>Kept private here</h3><p>${esc(d.localOnly)}</p>
+          ${d.teaches ? `<h3>How storage works here</h3><p>${esc(d.teaches)}</p>` : ""}
           <div class="demo-run"><button class="btn" data-run="${esc(d.id)}">Run</button></div>
           <div class="demo-out" id="out-${esc(d.id)}"></div>
           <details class="raw"><summary>How to revoke</summary><p>${esc(d.revoke)}</p></details>

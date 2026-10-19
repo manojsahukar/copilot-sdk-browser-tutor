@@ -75,7 +75,8 @@ r = await f("/api/me"); const me = await r.json();
 const meStr = JSON.stringify(me);
 ok("me.provider is openrouter", me.provider === "openrouter");
 ok("me.or.connected true", me.or.connected === true);
-ok("me.or.model is a free default", /:free$|openrouter\/free/.test(me.or.model));
+ok("me.or.model defaults to Auto (openrouter/auto)", me.or.model === "openrouter/auto");
+ok("picker still offers free models", (me.or.models || []).some((m) => m.free && /:free$|\/free$/.test(m.id)));
 ok("me.or has a key settings deep-link", /openrouter\.ai\/keys\//.test(me.or.settingsUrl));
 ok("the sk-or- key is NEVER sent to the client", !meStr.includes("MOCKKEY") && !/sk-or-/.test(meStr));
 

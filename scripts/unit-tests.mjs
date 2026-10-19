@@ -1,7 +1,7 @@
 // Fast, offline assertions for the security-critical invariants. Run: node scripts/unit-tests.mjs
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf } from "../src/agent.mjs";
+import { clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf, validateFollowups } from "../src/agent.mjs";
 import { makeVerifier, challengeFor, buildProvider, isAllowedModel, OR_BASE_URL, OR_DEFAULT_MODEL, OR_MODELS, OR_KEY_RE } from "../src/openrouter.mjs";
 
 let pass = 0;
@@ -13,13 +13,13 @@ ok("copilot-cli mode is rejected", () => assert.throws(() => clientOptions({ mod
 ok("default/undefined mode is rejected", () => assert.throws(() => clientOptions({ baseDirectory: "/tmp/x" })));
 
 console.log("gotcha 7: permission handler denies by default");
-for (const t of ["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo"])
+for (const t of ["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo", "suggest_followups"])
   ok(`allows custom tool ${t}`, () => assert.equal(permissionDecision({ kind: "custom-tool", toolName: t }).kind, "approve-once"));
 ok("rejects unknown custom tool", () => assert.equal(permissionDecision({ kind: "custom-tool", toolName: "exec_shell" }).kind, "reject"));
 ok("rejects shell kind", () => assert.equal(permissionDecision({ kind: "shell", toolName: "bash" }).kind, "reject"));
 ok("rejects write kind", () => assert.equal(permissionDecision({ kind: "write", toolName: "write_file" }).kind, "reject"));
 ok("rejects empty request", () => assert.equal(permissionDecision(undefined).kind, "reject"));
-ok("allowlist has exactly 4 tools", () => assert.equal(ALLOWED_TOOLS.size, 4));
+ok("allowlist has exactly 5 tools", () => assert.equal(ALLOWED_TOOLS.size, 5));
 
 console.log("openrouter: PKCE S256 code challenge");
 ok("verifier is a 43-char base64url string", () => { const v = makeVerifier(); assert.match(v, /^[A-Za-z0-9_-]{43}$/); });
@@ -30,8 +30,9 @@ ok("challengeFor == base64url(sha256(verifier))", () => {
 });
 
 console.log("openrouter: model allowlist (tool calling required)");
-ok("default model is allowlisted", () => assert.ok(isAllowedModel(OR_DEFAULT_MODEL)));
-ok("every curated model is free (:free or auto)", () => assert.ok(OR_MODELS.every((m) => /:free$/.test(m.id) || m.id === "openrouter/free")));
+ok("default model is Auto (openrouter/auto) and allowlisted", () => { assert.equal(OR_DEFAULT_MODEL, "openrouter/auto"); assert.ok(isAllowedModel(OR_DEFAULT_MODEL)); });
+ok("Auto is flagged as not free with a paid-routing note", () => { const a = OR_MODELS.find((m) => m.id === "openrouter/auto"); assert.ok(a && a.free === false && /paid/i.test(a.note)); });
+ok("the list still contains free (:free or /free) models", () => assert.ok(OR_MODELS.some((m) => m.free && /:free$|\/free$/.test(m.id))));
 ok("a non-curated model is rejected", () => assert.equal(isAllowedModel("openai/gpt-4o"), false));
 
 console.log("openrouter: BYOK provider is SSRF-safe and OpenAI-compatible");
@@ -47,5 +48,20 @@ ok("openrouter without a key falls back to copilot", () => assert.equal(provider
 console.log("openrouter: sk-or- keys are scrubbable");
 ok("OR_KEY_RE matches a real-shaped key", () => assert.match("err for sk-or-v1-0a1b2c3d".replace(OR_KEY_RE, "[redacted]"), /\[redacted\]/));
 ok("OR_KEY_RE leaves normal text alone", () => assert.equal("hello world".replace(OR_KEY_RE, "[redacted]"), "hello world"));
+
+console.log("suggest_followups: server-side validation neutralises malicious chips");
+ok("drops HTML, javascript:, URLs; keeps plain questions", () => {
+  const r = validateFollowups(["<img src=x onerror=alert(1)>", "javascript:alert(1)", "See http://evil.com/x", "What does my UA reveal?"]);
+  assert.deepEqual(r, ["What does my UA reveal?"]);
+});
+ok("caps at 4 and dedupes case-insensitively", () => {
+  const r = validateFollowups(["one", "ONE", "two", "three", "four", "five"]);
+  assert.equal(r.length, 4); assert.deepEqual(r, ["one", "two", "three", "four"]);
+});
+ok("truncates to <=80 chars and strips markdown/control chars", () => {
+  const r = validateFollowups(["**bold** `code` " + "x".repeat(100), "a\u0000b"]);
+  assert.ok(r[0].length <= 80); assert.ok(!/[*`\u0000]/.test(r[0])); assert.equal(r[1], "a b");
+});
+ok("non-array / junk yields empty list", () => { assert.deepEqual(validateFollowups(null), []); assert.deepEqual(validateFollowups([1, {}, "", "   "]), []); });
 
 console.log(`\nALL UNIT TESTS PASSED (${pass})`);

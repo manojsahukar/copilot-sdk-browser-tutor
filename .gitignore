@@ -7,3 +7,6 @@ dist/
 
 # local rollback snapshots (may contain secrets) — never commit
 rollback/
+
+# internal research, do not publish
+docs/SDK-OPTIONS.md

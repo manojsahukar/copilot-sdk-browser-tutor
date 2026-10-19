@@ -347,11 +347,13 @@ async function handle(req, res) {
     }
 
     res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", Connection: "keep-alive" });
-    const emit = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
+    let produced = false;
+    const emit = (o) => { if (o && (o.type === "delta" || o.type === "final")) produced = true; res.write(`data: ${JSON.stringify(o)}\n\n`); };
     const ping = setInterval(() => res.write(": ping\n\n"), 15000);
+    const isRateLimited = (m) => /\b429\b|rate.?limit|too many requests/i.test(m);
     try {
       const agent = await getAgent(sess, cfg.devBypass);
-      await runTurn(agent, {
+      const turn = () => runTurn(agent, {
         message,
         fingerprint: body.fingerprint && typeof body.fingerprint === "object" ? body.fingerprint : null,
         demoResults: body.demoResults && typeof body.demoResults === "object" ? body.demoResults : null,
@@ -359,11 +361,23 @@ async function handle(req, res) {
         serverView: serverView(req),
         emit,
       });
+      try {
+        await turn();
+      } catch (e) {
+        const raw = scrubTokens(e?.message || e);
+        // One automatic retry with backoff for an OpenRouter 429 (free pool is noisy), but only if we have not
+        // streamed any answer yet, so the user never sees a duplicated reply.
+        if (sess.provider === "openrouter" && isRateLimited(raw) && !produced) {
+          emit({ type: "notice", text: "OpenRouter rate-limited that request. Retrying once…" });
+          await new Promise((r) => setTimeout(r, 1500));
+          await turn();
+        } else { throw e; }
+      }
       emit({ type: "done" });
     } catch (e) {
       const msg = scrubTokens(e?.message || e);
       console.error("[chat]", msg);
-      emit({ type: "error", message: friendlyError(msg, sess.provider) }); // gotcha 10
+      emit({ type: "error", message: friendlyError(msg, sess.provider), canSwitch: isRateLimited(msg) || /deadline|tool call/i.test(msg) }); // gotcha 10
     } finally { clearInterval(ping); }
     return res.end();
   }
@@ -373,6 +387,9 @@ async function handle(req, res) {
 // Gotcha 10: turn raw Copilot / OpenRouter / auth failures into specific, friendly guidance.
 function friendlyError(msg, provider) {
   const m = msg.toLowerCase();
+  if (m.includes("deadline")) return provider === "openrouter"
+    ? "That model took too long (often a rate-limited free model). Tap the engine chip and switch to Auto or another model, then try again."
+    : "GitHub Copilot took too long to respond (it may be overloaded or rate-limited). Try again in a moment.";
   if (provider === "openrouter") {
     if (m.includes("402") || m.includes("insufficient") || m.includes("credit") || m.includes("negative")) return "Your OpenRouter account is out of credits for this model. Add credits at openrouter.ai, or switch to a free model from the engine picker.";
     if (m.includes("429") || m.includes("rate limit") || m.includes("rate-limit")) return "OpenRouter rate-limited this request (free models share a limited pool). Wait a moment and try again, or pick a different model.";
