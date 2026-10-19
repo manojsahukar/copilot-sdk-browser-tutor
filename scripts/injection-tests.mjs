@@ -33,6 +33,7 @@ const fakeReq = { method: "GET", url: "/", httpVersion: "1.1", socket: {}, heade
   "user-agent": vectors.userAgent, referer: vectors.referer,
   cookie: "bt_sess=SUPERSECRETSESSION; " + vectors.cookieName,
   authorization: "Bearer gho_shouldNeverLeak",
+  "x-api-key": "sk-or-v1-shouldNeverLeak",
   "x-origin-verify": "topsecretorigin",
 } };
 const sv = serverView(fakeReq);
@@ -40,5 +41,6 @@ const svs = JSON.stringify(sv);
 ok("cookie value hidden", () => assert.ok(!svs.includes("SUPERSECRETSESSION")));
 ok("authorization hidden", () => assert.ok(!svs.includes("gho_shouldNeverLeak")));
 ok("origin-verify secret hidden", () => assert.ok(!svs.includes("topsecretorigin")));
+ok("no sk-or- key leaks via server view", () => assert.ok(!svs.includes("sk-or-v1-shouldNeverLeak")));
 
 console.log(`\nALL INJECTION TESTS PASSED (${pass}). Note: mitigation reduces, not eliminates, prompt-injection risk.`);

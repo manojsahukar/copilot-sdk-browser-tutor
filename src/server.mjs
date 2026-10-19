@@ -10,6 +10,7 @@ import { serverView } from "./serverview.mjs";
 import { appSecrets, oauthConfigured, refreshGitHubToken } from "./appsecrets.mjs";
 import { GOTCHAS } from "./gotchas.mjs";
 import { DEMOS, DEMO_IDS } from "./demos.mjs";
+import { OR_MODELS, OR_DEFAULT_MODEL, OR_REVOKE_URL, OR_KEY_RE, isAllowedModel, makeVerifier, challengeFor, authorizeUrl, exchangeCode, keySettingsUrl } from "./openrouter.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "..", "public");
@@ -82,6 +83,8 @@ function setCookie(res, name, val, maxAge) {
   res.setHeader("Set-Cookie", [...[].concat(prev), c]);
 }
 const getSession = (req) => { const v = cookies(req).bt_sess; return v ? unseal(v) : null; };
+const sessSeconds = (sess) => Math.max(1, Math.floor(((sess.exp || Date.now()) - Date.now()) / 1000));
+const resealSession = (res, sess) => setCookie(res, "bt_sess", seal(sess), sessSeconds(sess));
 
 // ---------- helpers ----------
 function send(res, code, body, type = "application/json", extra = {}) {
@@ -109,7 +112,7 @@ function sameOrigin(req) {
   const o = req.headers.origin; if (!o) return false;
   try { return new URL(o).host === req.headers.host || o === new URL(cfg.baseUrl).origin; } catch { return false; }
 }
-const scrubTokens = (s) => String(s).replace(/gh[opsur]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+/g, "[redacted]");
+const scrubTokens = (s) => String(s).replace(/gh[opsur]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|sk-or-[A-Za-z0-9._-]+/g, "[redacted]");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
 function serveStatic(res, file) {
   const p = path.join(PUBLIC, path.normalize(file).replace(/^(\.\.[/\\])+/, ""));
@@ -256,10 +259,71 @@ async function handle(req, res) {
     return send(res, 200, { ok: true });
   }
 
+  // ---- OpenRouter OAuth PKCE (model engine = "user's own OpenRouter credits"). GitHub sign-in stays the gate. ----
+  if (p === "/auth/openrouter/login") {
+    if (!sess) return redirect(res, "/");
+    const verifier = makeVerifier();
+    const state = crypto.randomBytes(16).toString("hex");
+    // Short-lived, encrypted, HttpOnly: the verifier never reaches client JS (PKCE done server-side).
+    setCookie(res, "bt_or", seal({ v: verifier, st: state, exp: Date.now() + 600e3 }), 600);
+    return redirect(res, authorizeUrl({
+      callbackUrl: cfg.baseUrl + "/auth/openrouter/callback",
+      challenge: challengeFor(verifier), state,
+      label: `Browser Tutor (${sess.login})`,
+    }));
+  }
+  if (p === "/auth/openrouter/callback") {
+    if (!sess) return redirect(res, "/");
+    const code = url.searchParams.get("code"), state = url.searchParams.get("state");
+    const pkRaw = cookies(req).bt_or; const pk = pkRaw ? unseal(pkRaw) : null;
+    setCookie(res, "bt_or", "", 0);
+    if (!code || !state || !pk || state !== pk.st) return redirect(res, "/?or=state_error");
+    try {
+      const { key, userId } = await exchangeCode({ code, verifier: pk.v });
+      sess.or = { key, uid: userId, model: OR_DEFAULT_MODEL, at: Date.now() };
+      sess.provider = "openrouter";
+      resealSession(res, sess);
+      return redirect(res, "/?or=connected");
+    } catch (e) {
+      console.error("[openrouter]", scrubTokens(e?.message || e));
+      return redirect(res, "/?or=exchange_error");
+    }
+  }
+
   if (p === "/api/server-view") return send(res, 200, serverView(req));
 
   if (!sess) return send(res, 401, { error: "sign in first" });
-  if (p === "/api/me") return send(res, 200, { login: sess.login, name: sess.name, avatar: sess.avatar, dev: !!sess.dev });
+  if (p === "/api/me") return send(res, 200, {
+    login: sess.login, name: sess.name, avatar: sess.avatar, dev: !!sess.dev,
+    provider: sess.provider === "openrouter" && sess.or ? "openrouter" : "copilot",
+    or: sess.or
+      ? { connected: true, model: sess.or.model, models: OR_MODELS, default: OR_DEFAULT_MODEL, settingsUrl: keySettingsUrl(sess.or.key), revokeUrl: OR_REVOKE_URL }
+      : { connected: false, models: OR_MODELS, default: OR_DEFAULT_MODEL },
+  });
+
+  // Choose the model engine (and, for OpenRouter, the model). GitHub identity is unchanged.
+  if (p === "/api/provider" && req.method === "POST") {
+    if (!sameOrigin(req)) return send(res, 403, { error: "bad origin" });
+    let b; try { b = await readBody(req); } catch { return send(res, 400, { error: "bad body" }); }
+    if (b.provider === "openrouter") {
+      if (!sess.or) return send(res, 400, { error: "Connect OpenRouter first", connect: "/auth/openrouter/login" });
+      sess.provider = "openrouter";
+      if (b.model && isAllowedModel(b.model)) sess.or.model = b.model;
+      else if (b.model) return send(res, 400, { error: "model not in the curated list" });
+    } else {
+      sess.provider = "copilot";
+    }
+    resealSession(res, sess);
+    return send(res, 200, { ok: true, provider: sess.provider, model: sess.or ? sess.or.model : null });
+  }
+  // Disconnect OpenRouter: drop the key from the session and tell the user how to revoke it.
+  if (p === "/api/openrouter/disconnect" && req.method === "POST") {
+    if (!sameOrigin(req)) return send(res, 403, { error: "bad origin" });
+    const settingsUrl = sess.or ? keySettingsUrl(sess.or.key) : null;
+    delete sess.or; sess.provider = "copilot";
+    resealSession(res, sess);
+    return send(res, 200, { ok: true, revokeUrl: OR_REVOKE_URL, settingsUrl, note: "Key dropped from this session. Revoke it in your OpenRouter key settings to be sure." });
+  }
 
   if (p === "/api/chat" && req.method === "POST") {
     if (!sameOrigin(req)) return send(res, 403, { error: "bad origin" });
@@ -269,7 +333,8 @@ async function handle(req, res) {
     if (!message) return send(res, 400, { error: "empty message" });
 
     // Gotcha 5: refresh the access token before it expires, and persist the rotated refresh token in the cookie.
-    if (sess.token && sess.refresh && sess.atExp - Date.now() < 15 * 60e3) {
+    // Only needed for the Copilot engine; the OpenRouter engine authenticates to the model with the sk-or- key.
+    if (sess.provider !== "openrouter" && sess.token && sess.refresh && sess.atExp - Date.now() < 15 * 60e3) {
       try {
         const r = await refreshGitHubToken(sess.refresh);
         sess.token = r.token; sess.refresh = r.refresh; sess.atExp = Date.now() + r.expiresIn * 1000;
@@ -298,16 +363,24 @@ async function handle(req, res) {
     } catch (e) {
       const msg = scrubTokens(e?.message || e);
       console.error("[chat]", msg);
-      emit({ type: "error", message: friendlyError(msg) }); // gotcha 10
+      emit({ type: "error", message: friendlyError(msg, sess.provider) }); // gotcha 10
     } finally { clearInterval(ping); }
     return res.end();
   }
   send(res, 404, { error: "not found" });
 }
 
-// Gotcha 10: turn raw Copilot/auth failures into specific, friendly guidance.
-function friendlyError(msg) {
+// Gotcha 10: turn raw Copilot / OpenRouter / auth failures into specific, friendly guidance.
+function friendlyError(msg, provider) {
   const m = msg.toLowerCase();
+  if (provider === "openrouter") {
+    if (m.includes("402") || m.includes("insufficient") || m.includes("credit") || m.includes("negative")) return "Your OpenRouter account is out of credits for this model. Add credits at openrouter.ai, or switch to a free model from the engine picker.";
+    if (m.includes("429") || m.includes("rate limit") || m.includes("rate-limit")) return "OpenRouter rate-limited this request (free models share a limited pool). Wait a moment and try again, or pick a different model.";
+    if (m.includes("no endpoints") || m.includes("does not support") || m.includes("tool use") || m.includes("tool call") || m.includes("function call") || m.includes("tools")) return "The selected OpenRouter model can't do tool calling, which the tutor needs. Pick another model from the engine picker.";
+    if (m.includes("401") || m.includes("invalid api key") || m.includes("no auth")) return "OpenRouter didn't accept the connected key. Disconnect and reconnect OpenRouter.";
+    if (m.includes("404") || m.includes("not a valid model") || m.includes("unknown model")) return "That OpenRouter model is no longer available. Pick another from the engine picker.";
+    return "Something went wrong talking to OpenRouter: " + msg;
+  }
   if (m.includes("quota") || m.includes("rate limit") || m.includes("429")) return "You've hit a GitHub Copilot usage/rate limit for your account. Copilot Free has a monthly cap; wait or check your Copilot plan, then try again.";
   if (m.includes("not authenticated") || m.includes("401") || m.includes("token")) return "GitHub Copilot didn't accept your account. Make sure Copilot is enabled for your GitHub account, then sign out and back in.";
   if (m.includes("403") || m.includes("forbidden") || m.includes("sso") || m.includes("org")) return "Access was blocked. If your Copilot seat is managed by an organization, it may restrict third-party OAuth apps, or require SSO authorization. Ask an org admin to allow this app, or use a personal Copilot account.";

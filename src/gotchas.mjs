@@ -2,6 +2,7 @@
 // verified: "build" = observed/measured while building this app; "docs" = stated in official docs; "unverified" = not confirmed.
 // status: "fixed" | "mitigated" | "accepted" | "needs-human".
 const SDK = "https://github.com/github/copilot-sdk/blob/main";
+const OR = "https://openrouter.ai/docs";
 export const GOTCHAS = [
   {
     id: "llm-js-xss",
@@ -132,5 +133,62 @@ export const GOTCHAS = [
       { label: "OAuth app access restrictions (orgs)", url: "https://docs.github.com/en/organizations/managing-oauth-access-to-your-organizations-data/about-oauth-app-access-restrictions" },
     ],
     verified: "unverified",
+  },
+  {
+    id: "user-paid-keys-are-credentials",
+    title: "A user's OpenRouter key is a credential that spends their money",
+    status: "fixed",
+    what: "The OpenRouter OAuth PKCE flow returns an sk-or- API key tied to the user's account. It is a long-lived bearer credential: anyone holding it can make model calls billed to that user's OpenRouter credits.",
+    risk: "If the key leaks (logs, the model's own view, client JS, an error page, analytics) an attacker can drain the user's credits and impersonate their app usage. Treating it like ordinary config is how keys end up in log aggregators and LLM transcripts.",
+    app: "The sk-or- key is stored ONLY inside the AES-256-GCM encrypted, HttpOnly session cookie. It is never written to logs (the scrubber redacts gho_/ghu_/ghp_/ghs_/ghr_/github_pat_ AND sk-or- patterns), never placed in a tool result or the system prompt, and never sent to client JS (/api/me returns a boolean and a derived settings link, not the key). It is passed only to the local Copilot runtime as the BYOK provider apiKey. A Disconnect action drops it from the session and links the user to revoke it.",
+    fix: "key kept in sealed cookie only (src/server.mjs); scrubTokens() extended to sk-or- (src/server.mjs); /api/me never returns the key; buildProvider() passes it to the runtime only (src/openrouter.mjs).",
+    sources: [
+      { label: "OpenRouter API authentication (keys are bearer credentials)", url: `${OR}/api_reference/authentication` },
+      { label: "OpenRouter OAuth PKCE (key tied to the user's account)", url: `${OR}/guides/overview/auth/oauth` },
+    ],
+    verified: "build",
+  },
+  {
+    id: "spending-the-users-money",
+    title: "Running on a user's key can spend the user's credits",
+    status: "mitigated",
+    what: "Once connected, every chat turn on the OpenRouter engine is billed to the user. Paid models cost real money per token; a runaway loop or an expensive model could add up.",
+    risk: "A learning tool that silently picks a pricey model, or lets the model call itself in a loop, can surprise a user with a bill. OpenRouter's issued key defaults to no per-key limit unless one is set.",
+    app: "The default model is a free ':free' model with tool-calling support, so the default experience costs the user nothing; the curated picker lists only free models. Per-turn rate limiting (30/hour) and the deny-by-default, read-only tool design bound usage. The key is labelled 'Browser Tutor (<login>)' at issuance, and the UI deep-links the user to their key's settings page to set a spending limit or revoke it. NOTE: a per-key credit limit CAN be set at issuance via OpenRouter's authenticated create-auth-code API (limit + usage_limit_type), but that requires an app API key; the no-secret PKCE redirect flow this app uses cannot set it, so we rely on free-by-default plus the user-set limit. A documented trade-off, not a code gap.",
+    fix: "free ':free' default + curated free-only list (src/openrouter.mjs); rate limit + read-only tools (src/server.mjs, src/agent.mjs); key label + settings deep-link (src/openrouter.mjs, src/server.mjs).",
+    sources: [
+      { label: "OpenRouter OAuth PKCE optional params (key_label; redirect flow has no limit)", url: `${OR}/guides/overview/auth/oauth` },
+      { label: "OpenRouter models & pricing (free ':free' models)", url: "https://openrouter.ai/models" },
+    ],
+    verified: "build",
+  },
+  {
+    id: "byok-base-url-ssrf",
+    title: "A BYOK base URL is a server-side fetch target (SSRF)",
+    status: "fixed",
+    what: "The Copilot SDK's BYOK ProviderConfig takes a baseUrl that the runtime calls out to with the user's key attached. If that URL came from user input, the server could be aimed at internal addresses (169.254.169.254, localhost, private ranges) or an attacker's endpoint that harvests the key.",
+    risk: "A user-supplied base URL is a classic SSRF and a credential-exfiltration primitive: point it at a cloud metadata endpoint, an internal service, or a logging proxy and the server does the request for you, carrying the bearer key.",
+    app: "The base URL is a hard-coded constant (OR_BASE_URL = https://openrouter.ai/api/v1). There is NO path by which a user can set or influence it; the UI only chooses a model from a server-side allowlist. buildProvider() always uses the constant.",
+    fix: "hard-allowlisted OR_BASE_URL constant, never user-supplied (src/openrouter.mjs buildProvider); model also allowlisted server-side (isAllowedModel).",
+    sources: [
+      { label: "Copilot SDK BYOK ProviderConfig.baseUrl", url: `${SDK}/nodejs/README.md` },
+      { label: "OWASP: Server-Side Request Forgery prevention", url: "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html" },
+    ],
+    verified: "build",
+  },
+  {
+    id: "subscription-logins-off-limits",
+    title: "Consumer subscription logins (ChatGPT, Claude.ai) are off-limits server-side",
+    status: "accepted",
+    what: "It is tempting to let users 'Sign in with ChatGPT' or with Claude.ai so the app runs on their consumer subscription. Those providers' terms restrict using consumer-plan credentials/subscriptions through third-party, server-hosted, multi-user apps; their SDK sign-in flows target local, user-run tools, not a shared web backend.",
+    risk: "Routing a hosted multi-user app through someone's ChatGPT or Claude.ai subscription risks violating the provider's terms (account action, blocked access) and gives the app custody of consumer-auth tokens it should not hold.",
+    app: "Accepted by design: this app does NOT offer ChatGPT or Claude.ai subscription logins. The 'user pays' path is OpenRouter OAuth, which mints a scoped, user-owned API key the user explicitly authorizes and can revoke — a model the provider supports for third-party apps. The Copilot engine likewise uses the user's own GitHub token on their own Copilot plan. (Full comparison in docs/SDK-OPTIONS.md.)",
+    fix: "chose user-owned API-key OAuth (OpenRouter) and per-user GitHub/Copilot tokens; no consumer-subscription logins wired. Policy call — revisit if a provider adds a sanctioned third-party flow.",
+    sources: [
+      { label: "OpenRouter OAuth PKCE (sanctioned user-owned key for third-party apps)", url: `${OR}/guides/overview/auth/oauth` },
+      { label: "OpenAI usage policies", url: "https://openai.com/policies/usage-policies/" },
+      { label: "Anthropic usage policy", url: "https://www.anthropic.com/legal/aup" },
+    ],
+    verified: "docs",
   },
 ];

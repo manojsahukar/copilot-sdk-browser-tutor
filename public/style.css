@@ -130,3 +130,18 @@ a.brand{color:#e6edf3;text-decoration:none}
 .st-needs{background:#331616;color:#f87171;border-color:#7a2f2f}
 .gt-fix{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 12px;font-size:14px}
 summary .status{margin-left:6px}
+
+/* ---- Model engine picker ---- */
+.provider { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; }
+.provider .pv-label { color: var(--muted, #8b949e); margin-right: 2px; }
+.pv-opt { min-height: 44px; padding: 6px 14px; border-radius: 999px; border: 1px solid #30363d; background: #161b22; color: #c9d1d9; cursor: pointer; font-size: 13px; }
+.pv-opt.on { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.pv-model { min-height: 44px; max-width: 100%; padding: 4px 8px; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #c9d1d9; font-size: 13px; }
+.pv-link { display: inline-flex; align-items: center; color: #58a6ff; text-decoration: none; background: none; border: 0; cursor: pointer; font-size: 13px; padding: 4px 6px; min-height: 44px; }
+.pv-link:hover { text-decoration: underline; }
+.pv-danger { color: #f85149; }
+.pv-connect { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 14px; border-radius: 999px; background: #238636; color: #fff; text-decoration: none; font-size: 13px; }
+.pv-note { flex-basis: 100%; color: var(--muted, #8b949e); font-size: 12px; }
+.pv-banner { font-size: 13px; margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: #132a1a; border: 1px solid #238636; color: #c9d1d9; }
+.pv-banner.err { background: #2d1416; border-color: #f85149; }
+.pv-banner a { color: #58a6ff; }

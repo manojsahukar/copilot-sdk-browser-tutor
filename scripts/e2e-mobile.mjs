@@ -48,7 +48,7 @@ for (const vp of VPS) {
   if (local) { await p.click("#devLogin"); await p.waitForNavigation({ waitUntil: "networkidle0" }); }
   else {
     await p.setRequestInterception(true);
-    p.on("request", (r) => r.url().endsWith("/api/me") ? r.respond({ status: 200, contentType: "application/json", body: '{"login":"preview"}' }) : r.continue());
+    p.on("request", (r) => r.url().endsWith("/api/me") ? r.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ login: "preview", provider: "openrouter", or: { connected: true, model: "google/gemma-4-31b-it:free", default: "google/gemma-4-31b-it:free", settingsUrl: "https://openrouter.ai/keys/abc", revokeUrl: "https://openrouter.ai/settings/keys", models: [{ id: "google/gemma-4-31b-it:free", label: "Gemma 4 31B · free" }, { id: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super 120B · free" }, { id: "openrouter/free", label: "Auto (free models) · free" }] } }) }) : r.continue());
     await p.goto(BASE + "/static/app.html", { waitUntil: "networkidle0" });
   }
   await p.waitForFunction(() => document.querySelector("#svCards .card") && document.querySelector("#fpCards .card"), { timeout: 20000 });

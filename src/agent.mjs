@@ -1,5 +1,9 @@
-// Copilot SDK wiring: one shared runtime in "empty" (multi-user) mode, one Copilot session per signed-in user,
-// each session authenticated with THAT user's GitHub token so it uses their own Copilot entitlement.
+// Copilot SDK wiring: one shared runtime in "empty" (multi-user) mode, one Copilot session per signed-in user.
+// Each user picks a MODEL ENGINE after signing in:
+//   - "copilot": the session uses THAT user's GitHub token, so it runs on their own Copilot entitlement.
+//   - "openrouter": the session is fully BYOK (Copilot SDK ProviderConfig) against OpenRouter with the user's
+//     own sk-or- key, billed to their OpenRouter credits. This bypasses Copilot auth, so a user WITHOUT Copilot
+//     can still use the tutor. GitHub sign-in + ALLOWED_LOGINS remains the identity gate in both cases.
 import os from "node:os";
 import path from "node:path";
 import { CopilotClient } from "@github/copilot-sdk";
@@ -7,14 +11,15 @@ import { SYSTEM_PROMPT } from "./prompt.mjs";
 import { GOTCHAS } from "./gotchas.mjs";
 import { DEMOS, DEMO_IDS } from "./demos.mjs";
 import { refreshGitHubToken } from "./appsecrets.mjs";
+import { buildProvider, OR_DEFAULT_MODEL, isAllowedModel } from "./openrouter.mjs";
 
 const ALLOWED_TOOLS = new Set(["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo"]);
 export { ALLOWED_TOOLS };
 
 const BASE_DIR = process.env.COPILOT_HOME_DIR || path.join(os.tmpdir(), "browser-tutor-copilot");
-const MODEL = process.env.COPILOT_MODEL || undefined; // undefined => runtime default
+const MODEL = process.env.COPILOT_MODEL || undefined; // undefined => runtime default (copilot engine only)
 let userClient, devClient;
-const sessions = new Map(); // sid -> { session, ctx, auth, busy, last }
+const sessions = new Map(); // sid -> { session, ctx, auth, providerKey, busy, last }
 
 // Gotcha 3: assert multi-tenant "empty" mode for EVERY client we ever construct, so a shared
 // server can never expose the SDK's default shell/file/web tools.
@@ -29,13 +34,22 @@ export function permissionDecision(req) {
     : { kind: "reject", feedback: "Only the tutor's read-only tools are allowed." };
 }
 
+// Which model engine this session should use right now.
+function engineOf(sess) {
+  return sess.provider === "openrouter" && sess.or && sess.or.key ? "openrouter" : "copilot";
+}
+// A stable key for the (engine, model) pair; changing it means we must tear down and rebuild the session.
+export function providerKeyOf(sess) {
+  return engineOf(sess) === "openrouter" ? `or:${sess.or.model || OR_DEFAULT_MODEL}` : "copilot";
+}
+
 function clientFor(sess, devBypass) {
-  if (sess.token) {
-    // Real users: never fall back to ambient credentials on the server.
+  // OpenRouter and real Copilot users both run on a client that NEVER uses ambient server credentials.
+  if (engineOf(sess) === "openrouter" || sess.token) {
     return (userClient ??= new CopilotClient(clientOptions({ mode: "empty", baseDirectory: BASE_DIR, useLoggedInUser: false, sessionIdleTimeoutSeconds: 900, logLevel: "error" })));
   }
   if (!devBypass || !sess.dev) throw new Error("No GitHub token in session");
-  // DEV ONLY: let the SDK use its documented auth chain on this machine.
+  // DEV ONLY: let the SDK use its documented auth chain on this machine (copilot engine).
   return (devClient ??= new CopilotClient(clientOptions({ mode: "empty", baseDirectory: BASE_DIR + "-dev", useLoggedInUser: true, logLevel: "error" })));
 }
 
@@ -100,7 +114,7 @@ function tools(ctx) {
   return defs.map((d) => ({ ...d, handler: wrapTool(d.name, d.handler) }));
 }
 
-// Gotcha 5: supply the current token per session and refresh it before expiry via GitHub's token endpoint.
+// Gotcha 5 (copilot engine): supply the current token per session and refresh it before expiry.
 function makeTokenProvider(auth) {
   return async ({ reason } = {}) => {
     if (!auth.token) return { kind: "cancelled" };
@@ -114,26 +128,46 @@ function makeTokenProvider(auth) {
   };
 }
 
-export async function getAgent(sess, devBypass) {
-  let a = sessions.get(sess.sid);
-  if (a) { a.last = Date.now(); if (a.auth) { a.auth.token = sess.token ?? a.auth.token; a.auth.refresh = sess.refresh ?? a.auth.refresh; a.auth.atExp = sess.atExp ?? a.auth.atExp; } return a; }
-  const client = clientFor(sess, devBypass);
+async function buildSession(client, sess) {
   const ctx = { fingerprint: null, serverView: null, demoResults: {} };
   const auth = { token: sess.token || null, refresh: sess.refresh || null, atExp: sess.atExp || 0 };
-  const session = await client.createSession({
-    sessionId: `bt-${sess.sid}`,
-    ...(MODEL ? { model: MODEL } : {}),
-    // Per-user auth: a refreshable provider for real users; dev uses the machine's logged-in user.
-    ...(sess.token ? { gitHubToken: sess.token, gitHubTokenProvider: makeTokenProvider(auth) } : {}),
+  const engine = engineOf(sess);
+  const common = {
     streaming: true,
-    availableTools: ["custom:*"],           // only our read-only tools; no shell/file/web tools
+    availableTools: ["custom:*"],            // only our read-only tools; no shell/file/web tools
     tools: tools(ctx),
     systemMessage: { mode: "replace", content: SYSTEM_PROMPT },
     infiniteSessions: { enabled: false },
-    // Deny by default: only our own read-only tools, by exact name.
-    onPermissionRequest: permissionDecision,
-  });
-  a = { session, ctx, auth, busy: false, last: Date.now(), fresh: true };
+    onPermissionRequest: permissionDecision, // deny by default
+  };
+  let cfg;
+  if (engine === "openrouter") {
+    const model = isAllowedModel(sess.or.model) ? sess.or.model : OR_DEFAULT_MODEL;
+    cfg = { sessionId: `bt-${sess.sid}-or`, model, provider: buildProvider(sess.or.key, model), ...common };
+  } else {
+    cfg = {
+      sessionId: `bt-${sess.sid}-cp`,
+      ...(MODEL ? { model: MODEL } : {}),
+      ...(sess.token ? { gitHubToken: sess.token, gitHubTokenProvider: makeTokenProvider(auth) } : {}),
+      ...common,
+    };
+  }
+  const session = await client.createSession(cfg);
+  return { session, ctx, auth };
+}
+
+export async function getAgent(sess, devBypass) {
+  const want = providerKeyOf(sess);
+  let a = sessions.get(sess.sid);
+  if (a && a.providerKey === want) {
+    a.last = Date.now();
+    if (a.auth) { a.auth.token = sess.token ?? a.auth.token; a.auth.refresh = sess.refresh ?? a.auth.refresh; a.auth.atExp = sess.atExp ?? a.auth.atExp; }
+    return a;
+  }
+  if (a) { try { await a.session.disconnect(); } catch {} sessions.delete(sess.sid); } // engine/model switched: rebuild
+  const client = clientFor(sess, devBypass);
+  const built = await buildSession(client, sess);
+  a = { ...built, providerKey: want, busy: false, last: Date.now(), fresh: true };
   sessions.set(sess.sid, a);
   return a;
 }

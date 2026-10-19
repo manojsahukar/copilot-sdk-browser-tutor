@@ -1,7 +1,7 @@
 // Everything the server learns from a single HTTP request — no JavaScript needed.
 // Behind CloudFront: the viewer's own headers arrive bundled in x-bt-viewer-headers (set by a CloudFront Function,
 // because origin request policies are capped at 10 named headers), and edge facts arrive as CloudFront-Viewer-* headers.
-const HIDE = new Set(["cookie", "authorization", "x-amz-security-token", "x-origin-verify"]);
+const HIDE = new Set(["cookie", "authorization", "x-amz-security-token", "x-origin-verify", "x-api-key", "api-key", "proxy-authorization"]);
 const INFRA = /^(x-amzn-|x-amz-|x-forwarded-|via$|x-bt-|cloudfront-|forwarded$)/;
 const trust = () => process.env.TRUST_PROXY === "1";
 

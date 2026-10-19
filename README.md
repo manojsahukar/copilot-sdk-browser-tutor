@@ -6,15 +6,25 @@ agent** that explains each signal, how it is used for tracking and fingerprintin
 could do with it, and how to defend yourself. There are also **live, tap-to-run permission demos** (camera, mic,
 geolocation, cookies, cross-site requests) and an **"Agent SDK gotchas"** lesson about safely building agents like this one.
 
+After signing in you pick a **model engine**: **GitHub Copilot** (runs on *your* Copilot subscription) or **OpenRouter** (runs on
+*your* OpenRouter credits via OAuth PKCE — so a user **without** Copilot can still use the tutor, and the operator never pays for
+your inference or handles a raw API key). Both engines share the exact same tools, `run_demo`, permission allow-list, `mode:"empty"`
+hardening and streaming.
+
 Educational and defensive only. Nothing here attacks anyone; every "demo" runs against *your own* browser and reports
 only metadata back to the tutor.
 
 > **Live demo:** https://copilot-sdk.demo.curiosta.com — sign-in is currently limited to invited GitHub accounts
-> (`ALLOWED_LOGINS`). The code is model-agnostic and runs on your own GitHub Copilot entitlement.
+> (`ALLOWED_LOGINS`) — GitHub sign-in is the identity gate. Each user then runs on **their own** GitHub Copilot entitlement
+> **or** their own OpenRouter credits (default model is free).
 
 | Probe & chat | Live demos | SDK gotchas |
 |---|---|---|
 | ![chat](docs/mobile-chat.png) | ![demos](docs/demo-390.png) | ![gotchas](docs/gotchas-fixed-390.png) |
+
+| Pick your engine | OpenRouter connected |
+|---|---|
+| ![engine picker](docs/openrouter-picker-connect.png) | ![openrouter connected](docs/openrouter-picker-connected.png) |
 
 ## What it teaches
 
@@ -36,20 +46,25 @@ Browser ──HTTPS──> CloudFront ──(X-Origin-Verify secret header)─�
                                                                       │     per-user session: gitHubToken = the user's OAuth token
  Secrets Manager (client_id, client_secret, session_secret,          │     availableTools:["custom:*"] → only 4 read-only tools
                   origin_verify) ── read at runtime, never in env ────┘     JSON-RPC/stdio ─> bundled copilot-runtime child process
-                                                                            └─> GitHub Copilot API (billed to that user's plan)
+                                                                            ├─> GitHub Copilot API (billed to that user's Copilot plan)
+                                                                            └─> OpenRouter BYOK provider (OpenAI-compatible,
+                                                                                base URL hard-allowlisted; billed to the user's credits)
 ```
 
 - **Lambda (zip, nodejs22.x) + [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)** runs the plain Node server with response streaming; a **Function URL** gives it HTTPS.
 - **CloudFront** adds the custom domain and TLS, forwards viewer facts (bundled into one header to stay within the 10-header limit),
   and injects a secret **`X-Origin-Verify`** header so the origin rejects anyone hitting the Function URL directly (gotcha 9).
 - **Secrets Manager** holds *all* secrets as one JSON; **no secret is in Lambda env vars**.
-- **Sessions are stateless**: an AES-256-GCM encrypted `HttpOnly` cookie carries the login and the (refreshable) GitHub token,
-  so any Lambda instance can serve any user. When a request lands on a cold instance, the browser-held transcript is replayed.
+- **Two model engines, one code path**: the Copilot engine passes the user's GitHub token per session; the **OpenRouter** engine
+  uses the Copilot SDK's **BYOK `ProviderConfig`** (`type:"openai"`, `baseUrl` hard-coded to `https://openrouter.ai/api/v1`) with the
+  user's `sk-or-` key — a session with a provider bypasses Copilot auth, so Copilot is not required. Switching engine/model rebuilds the session.
+- **Sessions are stateless**: an AES-256-GCM encrypted `HttpOnly` cookie carries the login, the (refreshable) GitHub token and,
+  if connected, the OpenRouter key, so any Lambda instance can serve any user. When a request lands on a cold instance, the browser-held transcript is replayed.
 
 ## Security notes
 
 This project is itself a worked example of building an agent safely. The **[`/gotchas`](https://copilot-sdk.demo.curiosta.com/gotchas)**
-page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 10 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
+page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 14 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
 Accepted / Needs human) and a pointer to the code that handles each. Highlights:
 
 - **No model-generated JavaScript.** The model only returns text; live demos use a `run_demo` **enum** that maps a demo *name*
@@ -64,9 +79,29 @@ Accepted / Needs human) and a pointer to the code that handles each. Highlights:
   ambient-credential path is the localhost dev bypass, which **hard-fails at startup under `NODE_ENV=production`**.
 - **Token refresh.** The `ghr_` refresh token lives only in the encrypted cookie; the access token is refreshed before expiry;
   refresh failure logs the user out cleanly. Session capped at 7 days.
-- **Deny-by-default permissions** and **secret masking** (cookies, tokens, the origin secret never reach the model or logs).
+- **Deny-by-default permissions** and **secret masking** (cookies, tokens, the origin secret, `sk-or-` keys never reach the model or logs).
+- **User-paid keys handled as credentials (OpenRouter).** The `sk-or-` key lives only in the encrypted cookie; it is never logged
+  (the scrubber redacts `sk-or-` too), never sent to the model or client JS, and a Disconnect action drops it and links the user to revoke it.
+  The base URL is a hard-coded constant (no user-supplied base URL → no SSRF); the default model is a free `:free` tool-calling model,
+  and the UI deep-links the user to set a spending limit. Consumer-subscription logins (ChatGPT, Claude.ai) are deliberately **not**
+  offered server-side; OpenRouter's user-owned-key OAuth is the sanctioned "user pays" path.
 
 See the page for the full list and the exact files.
+
+## Model engines (who pays)
+
+| Engine | Who pays | Login | Needs Copilot? |
+|---|---|---|---|
+| **GitHub Copilot** | the signed-in user's Copilot plan | GitHub OAuth (identity gate) | yes |
+| **OpenRouter** | the signed-in user's OpenRouter credits | GitHub OAuth **+** OpenRouter OAuth PKCE | no |
+
+OpenRouter uses **OAuth PKCE (S256)**: the app redirects to `https://openrouter.ai/auth`, exchanges the returned code
+server-side at `https://openrouter.ai/api/v1/auth/keys`, and stores the resulting user-owned `sk-or-` key **only** in the
+encrypted session cookie. There is **no client secret and no extra AWS secret** (PKCE needs none). GitHub sign-in stays the
+identity gate (`ALLOWED_LOGINS`); OpenRouter is a *model-provider connection*, not a standalone login — making it standalone
+would bypass the allow-list and open the app to anyone with an OpenRouter account. Default model is a free, tool-calling
+`:free` model; a small curated list is offered because tool calling is required.
+
 
 ## Run locally
 
@@ -89,6 +124,7 @@ npm run dev              # then open http://localhost:8080 and "Continue without
 ```bash
 node scripts/unit-tests.mjs        # mode:"empty" assertion + deny-by-default permission handler
 node scripts/injection-tests.mjs   # prompt-injection vectors (UA, Referer, cookie name) are neutralised; secret masking
+node scripts/openrouter-e2e.mjs    # mocked OpenRouter PKCE: login params, state rejection, exchange, key never exposed, disconnect
 node scripts/e2e-mobile.mjs        # responsive checks at 360/390/768/1280 (needs: npm i --no-save puppeteer-core@23)
 ```
 
@@ -122,7 +158,7 @@ Teardown: `sam delete --stack-name browser-tutor --region "$AWS_REGION"`. See `d
 
 ```
 src/        server.mjs (routing, OAuth, sessions, origin lockdown, chat SSE), agent.mjs (SDK wiring, tools,
-            refresh, sanitation), appsecrets.mjs, serverview.mjs, prompt.mjs, gotchas.mjs, demos.mjs
+            refresh, sanitation), openrouter.mjs (OAuth PKCE + BYOK provider), appsecrets.mjs, serverview.mjs, prompt.mjs, gotchas.mjs, demos.mjs
 public/     static UI (index/app/demos/gotchas .html, probe.js, demos.js, chat.js, render.js, style.css)
 deploy/     template.yaml (SAM), cert-template.yaml, build.sh, deploy.sh, run.sh
 scripts/    unit-tests, injection-tests, e2e-*
