@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#161b22"><meta name="color-scheme" content="dark">
+<title>Browser Tutor</title><link rel="stylesheet" href="/static/style.css"></head>
+<body class="app">
+<header class="topbar">
+  <strong class="brand">🕵️ <span>Browser Tutor</span></strong>
+  <nav class="tabs" role="tablist">
+    <button data-tab="probe" class="tab active" role="tab" aria-selected="true">Probe</button>
+    <button data-tab="chat" class="tab" role="tab" aria-selected="false">Ask tutor</button>
+    <a class="tab" href="/demos">Live demos</a><a class="tab" href="/gotchas">SDK gotchas</a>
+  </nav>
+  <div class="who"><span id="me"></span><button id="logout" class="link">Sign out</button></div>
+</header>
+<main id="main">
+<section id="probe" class="panel">
+  <p class="lead">This is what this page's JavaScript can read from your browser <strong>right now</strong>, without any permission prompt.
+  Nothing has been sent yet. Review it, then choose whether to share it with the tutor.</p>
+  <div class="sharebar"><button class="btn" id="share">Share with tutor →</button><span id="shareState" class="muted"></span></div>
+  <div class="grid">
+    <div class="col"><h2>What JavaScript sees</h2><div id="fpCards" class="cards"><p class="muted">collecting…</p></div>
+      <details class="raw"><summary>Raw JSON</summary><pre id="fp"></pre></details></div>
+    <div class="col"><h2>What the server saw <span class="muted">(no JS needed)</span></h2><div id="svCards" class="cards"><p class="muted">loading…</p></div>
+      <details class="raw"><summary>Raw JSON</summary><pre id="sv"></pre></details></div>
+  </div>
+</section>
+<section id="chat" class="panel chat" hidden>
+  <div id="log" aria-live="polite"><div class="msg bot">Hi! Ask me things like <em>“What does my user agent reveal?”</em>, <em>“How unique am I?”</em> or <em>“Walk me through everything you can see, worst first.”</em></div></div>
+  <button id="jump" class="jump" hidden aria-label="Scroll to latest">↓ Latest</button>
+  <div class="composer">
+    <p class="muted" id="fpNote"></p>
+    <form id="form"><textarea id="q" rows="1" autocomplete="off" enterkeyhint="send" placeholder="Ask about your browser…" maxlength="4000" aria-label="Message"></textarea><button class="btn">Send</button></form>
+  </div>
+</section>
+</main>
+<script src="/static/render.js"></script><script src="/static/probe.js"></script><script src="/static/chat.js"></script>
+</body></html>

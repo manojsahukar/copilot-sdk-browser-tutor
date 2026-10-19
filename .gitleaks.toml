@@ -1,0 +1,16 @@
+# Gitleaks config for this repo. We keep only placeholders in committed files; real secrets live in
+# AWS Secrets Manager (prod) or a gitignored .env / .deploy-secrets (local), never in git.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation placeholders, not real secrets"
+paths = [
+  '''\.env\.example''',
+]
+regexes = [
+  '''REPLACE_ME''',
+  '''REPLACE_WITH_64_HEX_CHARS''',
+  '''<account-id>''',
+  '''XXXXXX''',
+]

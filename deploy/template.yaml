@@ -1,0 +1,244 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Browser Tutor PoC — Copilot SDK agent on Lambda (zip) + Lambda Web Adapter + Function URL (response streaming), locked behind CloudFront
+
+Parameters:
+  GitHubOAuthSecretArn:
+    Type: String
+    Description: >-
+      Secrets Manager secret ARN. JSON {client_id, client_secret, session_secret, origin_verify}.
+      Read at runtime; NO secret is placed in Lambda env vars. (No default: pass your own ARN.)
+  OriginVerify:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret CloudFront injects as X-Origin-Verify so the origin rejects direct Function-URL hits. Must equal origin_verify in the secret JSON.
+  AllowedLogins: { Type: String, Default: "" }
+  BaseUrl:
+    Type: String
+    Default: ""
+    Description: "Public site URL, e.g. https://tutor.example.com (empty on first deploy, before the URL/domain is known)"
+
+  DomainName: { Type: String, Default: "", Description: "Main custom domain, e.g. tutor.example.com (empty = no CloudFront)" }
+  CertificateArn: { Type: String, Default: "", Description: "ACM cert in us-east-1 for DomainName and SiblingDomainName (deploy/cert-template.yaml)" }
+  HostedZoneId: { Type: String, Default: "", Description: "Route 53 hosted zone id for the records (empty = manage DNS yourself)" }
+  SiblingDomainName: { Type: String, Default: "", Description: "Second origin for cross-site demos, e.g. sibling.example.com" }
+  SiblingCertificateArn: { Type: String, Default: "", Description: "ACM cert in us-east-1 for SiblingDomainName" }
+  CookieDomain: { Type: String, Default: "", Description: "Parent domain shared by both sites, e.g. example.com, for the cross-site cookie demo" }
+
+Conditions:
+  HasBaseUrl: !Not [!Equals [!Ref BaseUrl, ""]]
+  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
+  HasSibling: !Not [!Equals [!Ref SiblingDomainName, ""]]
+  HasZone: !Not [!Equals [!Ref HostedZoneId, ""]]
+  MainDns: !And [!Condition HasDomain, !Condition HasZone]
+  SiblingDns: !And [!Condition HasSibling, !Condition HasZone]
+
+Resources:
+  TutorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: browser-tutor
+      CodeUri: ../dist/browser-tutor.zip
+      Handler: run.sh
+      Runtime: nodejs22.x
+      Architectures: [x86_64]
+      MemorySize: 1024
+      Timeout: 120
+      ReservedConcurrentExecutions: 5
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:30
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_INVOKE_MODE: response_stream
+          AWS_LWA_PORT: "8080"
+          AWS_LWA_READINESS_CHECK_PATH: /healthz
+          PORT: "8080"
+          HOST: 127.0.0.1
+          HOME: /tmp
+          COPILOT_HOME_DIR: /tmp/copilot
+          NODE_ENV: production
+          TRUST_PROXY: "1"
+          GITHUB_OAUTH_SECRET_ARN: !Ref GitHubOAuthSecretArn    # client id/secret, session_secret, origin_verify all live here
+          ALLOWED_LOGINS: !Ref AllowedLogins
+          BASE_URL: !If [HasBaseUrl, !Ref BaseUrl, "https://placeholder.invalid"]
+          SIBLING_HOST: !If [HasSibling, !Ref SiblingDomainName, ""]
+          SIBLING_URL: !If [HasSibling, !Sub "https://${SiblingDomainName}", ""]
+          COOKIE_DOMAIN: !Ref CookieDomain
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref GitHubOAuthSecretArn
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+
+  TutorLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/browser-tutor
+      RetentionInDays: 7
+
+  # ---------- Shared CloudFront bits ----------
+  ViewerHeadersFunction:
+    Type: AWS::CloudFront::Function
+    Condition: HasDomain
+    Properties:
+      Name: browser-tutor-viewer-headers
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Bundle viewer request headers into one header (origin request policies allow only 10 named headers)
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var r = event.request, h = r.headers, out = {};
+          for (var k in h) {
+            if (k === 'cookie' || k === 'host' || k === 'x-origin-verify' || k.indexOf('x-bt-') === 0) continue;
+            var v = h[k];
+            out[k] = v.multiValue ? v.multiValue.map(function (x) { return x.value; }).join(', ') : v.value;
+          }
+          r.headers['x-bt-viewer-headers'] = { value: encodeURIComponent(JSON.stringify(out)) };
+          return r;
+        }
+
+  OriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Condition: HasDomain
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: browser-tutor-origin
+        Comment: Viewer facts for Browser Tutor; Host is NOT forwarded (Function URL needs its own host)
+        CookiesConfig: { CookieBehavior: all }
+        QueryStringsConfig: { QueryStringBehavior: all }
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers:
+            - CloudFront-Viewer-Address
+            - CloudFront-Viewer-Http-Version
+            - CloudFront-Viewer-TLS
+            - CloudFront-Viewer-Country
+            - CloudFront-Viewer-City
+            - Origin
+            - User-Agent
+            - Accept-Language
+            - Content-Type
+            - x-bt-viewer-headers
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: HasDomain
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: browser-tutor PoC (main)
+        Aliases: [!Ref DomainName]
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_200
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: fnurl
+            DomainName: !Select [2, !Split ["/", !GetAtt TutorFunctionUrl.FunctionUrl]]
+            OriginCustomHeaders:
+              - { HeaderName: X-Origin-Verify, HeaderValue: !Ref OriginVerify }   # gotcha 9: only CloudFront can reach the origin
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: fnurl
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad   # Managed-CachingDisabled
+          OriginRequestPolicyId: !Ref OriginRequestPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt ViewerHeadersFunction.FunctionMetadata.FunctionARN
+
+  SiblingDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: HasSibling
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: browser-tutor PoC (sibling origin for cross-site demos)
+        Aliases: [!Ref SiblingDomainName]
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_200
+        ViewerCertificate:
+          AcmCertificateArn: !Ref SiblingCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: fnurl
+            DomainName: !Select [2, !Split ["/", !GetAtt TutorFunctionUrl.FunctionUrl]]
+            OriginCustomHeaders:
+              - { HeaderName: X-Origin-Verify, HeaderValue: !Ref OriginVerify }
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: fnurl
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: !Ref OriginRequestPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt ViewerHeadersFunction.FunctionMetadata.FunctionARN
+
+  DnsA:
+    Type: AWS::Route53::RecordSet
+    Condition: MainDns
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget: { DNSName: !GetAtt Distribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
+  DnsAAAA:
+    Type: AWS::Route53::RecordSet
+    Condition: MainDns
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: AAAA
+      AliasTarget: { DNSName: !GetAtt Distribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
+  SiblingDnsA:
+    Type: AWS::Route53::RecordSet
+    Condition: SiblingDns
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref SiblingDomainName
+      Type: A
+      AliasTarget: { DNSName: !GetAtt SiblingDistribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
+  SiblingDnsAAAA:
+    Type: AWS::Route53::RecordSet
+    Condition: SiblingDns
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref SiblingDomainName
+      Type: AAAA
+      AliasTarget: { DNSName: !GetAtt SiblingDistribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
+
+Outputs:
+  FunctionUrl:
+    Value: !GetAtt TutorFunctionUrl.FunctionUrl
+  OAuthCallbackUrl:
+    Value: !If [HasDomain, !Sub "https://${DomainName}/auth/callback", !Sub "${TutorFunctionUrl.FunctionUrl}auth/callback"]
+  SiteUrl:
+    Condition: HasDomain
+    Value: !Sub "https://${DomainName}"
+  SiblingUrl:
+    Condition: HasSibling
+    Value: !Sub "https://${SiblingDomainName}"

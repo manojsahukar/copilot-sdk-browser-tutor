@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Browser Tutor — ACM certificate for CloudFront (must live in us-east-1), DNS-validated in Route 53
+Parameters:
+  DomainName: { Type: String, Description: "Main domain, e.g. tutor.example.com" }
+  SiblingDomainName: { Type: String, Description: "Cross-site demo domain, e.g. sibling.example.com" }
+  HostedZoneId: { Type: String, Description: "Route 53 hosted zone id that owns both domains" }
+Resources:
+  Cert:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId   # CloudFormation creates the validation CNAME automatically
+      Tags: [{ Key: project, Value: browser-tutor }]
+  SiblingCert:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref SiblingDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref SiblingDomainName
+          HostedZoneId: !Ref HostedZoneId
+      Tags: [{ Key: project, Value: browser-tutor }]
+Outputs:
+  CertificateArn: { Value: !Ref Cert }
+  SiblingCertificateArn: { Value: !Ref SiblingCert }

@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161b22"><meta name="color-scheme" content="dark">
+<title>Agent SDK gotchas — Browser Tutor</title><link rel="stylesheet" href="/static/style.css"></head>
+<body class="app">
+<header class="topbar">
+  <a class="brand" href="/">🕵️ <span>Browser Tutor</span></a>
+  <nav class="tabs">
+    <a class="tab" href="/">Probe</a><a class="tab" href="/#chat">Ask tutor</a><a class="tab" href="/demos">Live demos</a><a class="tab active" href="/gotchas" aria-current="page">SDK gotchas</a>
+  </nav>
+</header>
+<main class="lesson">
+  <h1>Agent SDK gotchas</h1>
+  <p class="lead">Pitfalls we hit, or the GitHub Copilot SDK docs warn about, while building this app, and what the app does about each.
+  Labels: <span class="badge build">seen in this build</span> <span class="badge docs">from the docs</span> <span class="badge unverified">unverified</span>.
+  Each item has a status: <span class="status st-fixed">Fixed</span> <span class="status st-mitigated">Mitigated</span> <span class="status st-accepted">Accepted</span> <span class="status st-needs">Needs human</span>. Signed in? Ask the tutor about any item.</p>
+  <div class="gt-tools"><button class="btn secondary" id="expandAll">Expand all</button></div>
+  <ol id="gotchas" class="cards gotchas"><li class="muted">loading…</li></ol>
+</main>
+<script src="/static/gotchas.js"></script>
+</body></html>

@@ -1,0 +1,23 @@
+// Headless E2E (dev bypass). Needs: npm i --no-save puppeteer-core@23 ; server running with DEV_AUTH_BYPASS=1 on :8080
+import puppeteer from "puppeteer-core";
+const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", headless: "new", args: ["--no-sandbox", "--window-size=1366,900"] });
+const p = await b.newPage(); await p.setViewport({ width: 1366, height: 900 });
+p.on("console", m => console.log("[console]", m.text())); p.on("pageerror", e => console.log("[pageerror]", e.message));
+await p.goto("http://localhost:8080/", { waitUntil: "networkidle0" });
+await p.screenshot({ path: "/workspace/browser-tutor/docs/screenshot-landing.png" });
+await p.click("#devLogin"); await p.waitForNavigation({ waitUntil: "networkidle0" });
+await p.waitForFunction(() => window.BT && window.BT.fingerprint, { timeout: 20000 });
+const fp = await p.evaluate(() => window.BT.fingerprint);
+console.log("FP sections:", Object.keys(fp).join(","));
+console.log("sample:", JSON.stringify({ tz: fp.locale.timeZone, langs: fp.locale.languages, ch: fp.clientHints?.highEntropy?.platformVersion, canvas: fp.canvas.hash, webgl: fp.webgl.unmaskedRenderer, fonts: fp.fonts.detectedCount, media: fp.mediaDevices, perms: fp.permissions, battery: fp.battery, summary: fp.summaryHash }));
+await new Promise(r => setTimeout(r, 800));
+const sv = await p.$eval("#sv", e => e.textContent); console.log("server-view has sec-ch-ua:", sv.includes("sec-ch-ua"));
+await p.screenshot({ path: "/workspace/browser-tutor/docs/screenshot-probe.png" });
+await p.click("#share");
+await p.type("#q", "Using my shared fingerprint: which 3 signals make me most unique, and one defense each? Keep it short.");
+await p.click("#form button");
+await p.waitForFunction(() => !document.querySelector("#form button").disabled, { timeout: 150000 });
+const msgs = await p.$$eval(".msg", els => els.map(e => e.className + ": " + e.innerText.slice(0, 900)));
+console.log(msgs.slice(1).join("\n---\n"));
+await p.screenshot({ path: "/workspace/browser-tutor/docs/screenshot-chat.png", fullPage: true });
+await b.close();

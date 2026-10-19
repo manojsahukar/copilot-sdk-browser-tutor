@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161b22"><meta name="color-scheme" content="dark">
+<title>Live demos — Browser Tutor</title><link rel="stylesheet" href="/static/style.css"></head>
+<body class="app">
+<header class="topbar">
+  <a class="brand" href="/">🕵️ <span>Browser Tutor</span></a>
+  <nav class="tabs">
+    <a class="tab" href="/">Probe</a><a class="tab" href="/#chat">Ask tutor</a>
+    <a class="tab active" href="/demos" aria-current="page">Live demos</a><a class="tab" href="/gotchas">SDK gotchas</a>
+  </nav>
+</header>
+<main class="lesson">
+  <h1>Live demos</h1>
+  <p class="lead">Tap <strong>Run</strong> to see what a website can ask your browser for. Media stays on your device, location is
+  shared only coarsely, and only harmless metadata is ever sent to the tutor. Nothing runs until you tap.</p>
+  <p class="muted" id="siteNote"></p>
+  <div id="demos" class="cards demos"><p class="muted">loading…</p></div>
+</main>
+<script src="/static/demos.js"></script>
+</body></html>
