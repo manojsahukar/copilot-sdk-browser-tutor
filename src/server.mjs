@@ -125,6 +125,10 @@ function rateOk(sid) {
 
 // ---------- SIBLING origin (a genuinely different site, for cross-site demos) ----------
 function isSibling(req) {
+  // In production both distributions share one Function URL origin and Host is not forwarded, so the sibling
+  // CloudFront distribution tags its requests with an origin custom header (set by CloudFront, not forwardable
+  // from a viewer, so it can't be forged). Locally we fall back to the port / hostname.
+  if (req.headers["x-bt-site"] === "sibling") return true;
   if (cfg.siblingPort && req.socket.localPort === cfg.siblingPort) return true;
   const host = String(req.headers.host || "").toLowerCase().split(":")[0];
   return !!cfg.siblingHost && host === cfg.siblingHost;
@@ -181,7 +185,12 @@ async function handle(req, res) {
   // Gotcha 9: only CloudFront may reach the origin. CloudFront injects X-Origin-Verify as a custom origin header;
   // direct hits to the Function URL lack it. (Disabled locally when no secret is configured.)
   await ensureSecrets();
-  if (ORIGIN_VERIFY && req.headers["x-origin-verify"] !== ORIGIN_VERIFY) return send(res, 403, { error: "Direct origin access is blocked; use the site via CloudFront." });
+  // Staged rollout: when ORIGIN_VERIFY_ENFORCE=0 the header is checked but NOT enforced (lets CloudFront's custom
+  // header propagate before the origin starts rejecting). Default (unset) = enforce.
+  const enforceOrigin = ORIGIN_VERIFY && process.env.ORIGIN_VERIFY_ENFORCE !== "0";
+  if (!enforceOrigin && ORIGIN_VERIFY && p === "/api/origin-check")
+    return send(res, 200, { enforcing: false, originHeaderPresent: !!req.headers["x-origin-verify"], matches: req.headers["x-origin-verify"] === ORIGIN_VERIFY });
+  if (enforceOrigin && req.headers["x-origin-verify"] !== ORIGIN_VERIFY) return send(res, 403, { error: "Direct origin access is blocked; use the site via CloudFront." });
 
   if (isSibling(req)) return handleSibling(req, res, p);
   const sess = getSession(req);

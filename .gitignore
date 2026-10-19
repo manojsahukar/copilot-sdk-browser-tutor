@@ -4,3 +4,6 @@ dist/
 .aws-sam/
 *.zip
 .deploy-secrets
+
+# local rollback snapshots (may contain secrets) — never commit
+rollback/

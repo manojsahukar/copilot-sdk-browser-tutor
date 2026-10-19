@@ -38,6 +38,7 @@ sam deploy \
   --parameter-overrides \
     GitHubOAuthSecretArn="$GITHUB_OAUTH_SECRET_ARN" \
     OriginVerify="$ORIGIN_VERIFY" \
+    ${ORIGIN_VERIFY_ENFORCE:+OriginVerifyEnforce="$ORIGIN_VERIFY_ENFORCE"} \
     ${BASE_URL:+BaseUrl="$BASE_URL"} \
     ${ALLOWED_LOGINS:+AllowedLogins="$ALLOWED_LOGINS"} \
     ${DOMAIN_NAME:+DomainName="$DOMAIN_NAME"} \

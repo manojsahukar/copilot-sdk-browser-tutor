@@ -13,6 +13,11 @@ Parameters:
     NoEcho: true
     MinLength: 16
     Description: Shared secret CloudFront injects as X-Origin-Verify so the origin rejects direct Function-URL hits. Must equal origin_verify in the secret JSON.
+  OriginVerifyEnforce:
+    Type: String
+    Default: "1"
+    AllowedValues: ["0", "1"]
+    Description: "Staged rollout flag. 1 = origin rejects requests lacking X-Origin-Verify. Set 0 for the first deploy so CloudFront's header propagates, then 1."
   AllowedLogins: { Type: String, Default: "" }
   BaseUrl:
     Type: String
@@ -61,6 +66,7 @@ Resources:
           NODE_ENV: production
           TRUST_PROXY: "1"
           GITHUB_OAUTH_SECRET_ARN: !Ref GitHubOAuthSecretArn    # client id/secret, session_secret, origin_verify all live here
+          ORIGIN_VERIFY_ENFORCE: !Ref OriginVerifyEnforce
           ALLOWED_LOGINS: !Ref AllowedLogins
           BASE_URL: !If [HasBaseUrl, !Ref BaseUrl, "https://placeholder.invalid"]
           SIBLING_HOST: !If [HasSibling, !Ref SiblingDomainName, ""]
@@ -181,6 +187,7 @@ Resources:
             DomainName: !Select [2, !Split ["/", !GetAtt TutorFunctionUrl.FunctionUrl]]
             OriginCustomHeaders:
               - { HeaderName: X-Origin-Verify, HeaderValue: !Ref OriginVerify }
+              - { HeaderName: X-BT-Site, HeaderValue: sibling }
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
               OriginSSLProtocols: [TLSv1.2]
