@@ -1,16 +1,22 @@
 /* OpenRouter chat widget — no inline styles needed; loads under a strict CSP. */
 .btw-root { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-.btw-fab { position: fixed; right: 16px; bottom: 16px; z-index: 2; border: 0; border-radius: 999px; background: #2563eb; color: #fff; padding: 12px 18px; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+.btw-sheet[hidden], .btw-backdrop[hidden], .btw-fab[hidden] { display: none !important; }
+.btw-fab { position: fixed; right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 2; border: 0; border-radius: 999px; background: #2563eb; color: #fff; padding: 12px 18px; min-height: 48px; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.25); touch-action: manipulation; }
 .btw-fab:hover { background: #1d4ed8; }
 .btw-fab:focus-visible, .btw-conn:focus-visible, .btw-close:focus-visible, .btw-send:focus-visible, .btw-model:focus-visible, .btw-input:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
 .btw-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1; }
-.btw-sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 3; margin: 0 auto; max-width: 480px; height: min(78vh, 620px); background: #0f141b; color: #e6edf3; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; overflow: hidden; }
+.btw-sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 3; margin: 0 auto; max-width: 480px; height: min(78vh, 620px); max-height: 100%; background: #0f141b; color: #e6edf3; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; overflow: hidden; }
+.btw-grip { flex: 0 0 auto; width: 100%; padding: 8px 0 2px; display: flex; justify-content: center; cursor: grab; touch-action: none; }
+.btw-grip::before { content: ""; width: 40px; height: 4px; border-radius: 999px; background: #39424e; }
 .btw-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #222b36; }
 .btw-title { font-size: 14px; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .btw-model { flex: 1 1 auto; min-width: 0; background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; padding: 6px; font-size: 12px; }
 .btw-conn { flex: 0 0 auto; border: 1px solid #30363d; background: #1f6feb; color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
 .btw-conn.on { background: #21262d; }
-.btw-close { flex: 0 0 auto; border: 0; background: transparent; color: #8b949e; font-size: 18px; cursor: pointer; padding: 4px 6px; }
+.btw-conn.pulse { animation: btw-pulse 1s ease-in-out 2; }
+@keyframes btw-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(31,111,235,.6); } 50% { box-shadow: 0 0 0 6px rgba(31,111,235,0); } }
+.btw-close { flex: 0 0 auto; border: 0; background: transparent; color: #8b949e; font-size: 20px; line-height: 1; cursor: pointer; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 10px; touch-action: manipulation; }
+.btw-close:hover { background: #1b222c; color: #e6edf3; }
 .btw-note { padding: 8px 12px; font-size: 12px; color: #9aa7b4; border-bottom: 1px solid #1a212b; background: #0c1016; }
 .btw-log { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .btw-msg { max-width: 92%; padding: 8px 12px; border-radius: 12px; word-wrap: break-word; overflow-wrap: anywhere; }
@@ -20,7 +26,7 @@
 .btw-assistant a { color: #58a6ff; } .btw-assistant code { background: #0b0f14; padding: 1px 5px; border-radius: 5px; font-size: 13px; }
 .btw-assistant pre { background: #0b0f14; padding: 10px; border-radius: 8px; overflow-x: auto; }
 .btw-assistant table { border-collapse: collapse; display: block; overflow-x: auto; } .btw-assistant th, .btw-assistant td { border: 1px solid #30363d; padding: 4px 8px; }
-.btw-composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #222b36; background: #0c1016; }
+.btw-composer { display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid #222b36; background: #0c1016; }
 .btw-input { flex: 1 1 auto; resize: none; background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 10px; padding: 9px 12px; font: inherit; max-height: 120px; }
 .btw-input:disabled { opacity: .5; }
 .btw-send { flex: 0 0 auto; border: 0; border-radius: 10px; background: #238636; color: #fff; padding: 0 16px; font-weight: 600; cursor: pointer; }

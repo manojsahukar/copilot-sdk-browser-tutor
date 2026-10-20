@@ -321,6 +321,7 @@
 
     var sheet = h("div", "btw-sheet"); sheet.setAttribute("role", "dialog"); sheet.setAttribute("aria-modal", "true");
     sheet.setAttribute("aria-label", "Chat with " + cfg.siteName); sheet.hidden = true;
+    var grip = h("div", "btw-grip"); grip.setAttribute("aria-hidden", "true"); grip.title = "Drag down to close";
 
     var head = h("div", "btw-head");
     var title = h("strong", "btw-title", cfg.siteName);
@@ -339,24 +340,55 @@
     var sendBtn = h("button", "btw-send", "Send"); sendBtn.type = "submit";
     form.appendChild(ta); form.appendChild(sendBtn);
 
-    sheet.appendChild(head); sheet.appendChild(note); sheet.appendChild(log); sheet.appendChild(form);
+    sheet.appendChild(grip); sheet.appendChild(head); sheet.appendChild(note); sheet.appendChild(log); sheet.appendChild(form);
     root.appendChild(fab); root.appendChild(backdrop); root.appendChild(sheet);
     document.body.appendChild(root);
 
     var history = loadHistory();
 
-    function open() { backdrop.hidden = false; sheet.hidden = false; fab.setAttribute("aria-expanded", "true"); refresh(); setTimeout(function () { ta.focus(); }, 50); }
-    function closeSheet() { backdrop.hidden = true; sheet.hidden = true; fab.setAttribute("aria-expanded", "false"); }
-    fab.addEventListener("click", open);
-    close.addEventListener("click", closeSheet);
-    backdrop.addEventListener("click", closeSheet);
+    // Keep the sheet inside the VISIBLE (visual) viewport, above the mobile keyboard, and on-screen even
+    // if the host page has horizontal/vertical overflow (which otherwise pushes fixed elements off-screen).
+    function fit() {
+      var vv = window.visualViewport; if (!vv) return;
+      sheet.style.height = Math.min(Math.round(vv.height * 0.92), 640) + "px";
+      sheet.style.bottom = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) + "px";
+    }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", function () { if (!sheet.hidden) fit(); });
+      window.visualViewport.addEventListener("scroll", function () { if (!sheet.hidden) fit(); });
+    }
+
+    var pushed = false;
+    function open() {
+      if (!sheet.hidden) return;
+      backdrop.hidden = false; sheet.hidden = false; fab.setAttribute("aria-expanded", "true");
+      try { if (!pushed) { window.history.pushState({ btwOpen: 1 }, ""); pushed = true; } } catch (e) {}
+      fit(); refresh(); setTimeout(function () { try { ta.focus(); } catch (e) {} }, 50);
+    }
+    function closeSheet(fromPop) {
+      if (sheet.hidden) return;
+      backdrop.hidden = true; sheet.hidden = true; sheet.style.transform = ""; fab.setAttribute("aria-expanded", "false");
+      if (pushed && !fromPop) { try { window.history.back(); } catch (e) { pushed = false; } } else { pushed = false; }
+    }
+    fab.addEventListener("click", function () { open(); });
+    close.addEventListener("click", function () { closeSheet(); });
+    backdrop.addEventListener("click", function () { closeSheet(); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !sheet.hidden) closeSheet(); });
+    // Android hardware/gesture back closes the sheet instead of leaving the page.
+    window.addEventListener("popstate", function () { pushed = false; if (!sheet.hidden) closeSheet(true); });
+    // Swipe the grip down to dismiss.
+    (function () {
+      var sy = null, cy = null;
+      grip.addEventListener("touchstart", function (e) { sy = e.touches[0].clientY; cy = sy; }, { passive: true });
+      grip.addEventListener("touchmove", function (e) { if (sy == null) return; cy = e.touches[0].clientY; sheet.style.transform = "translateY(" + Math.max(0, cy - sy) + "px)"; }, { passive: true });
+      grip.addEventListener("touchend", function () { if (sy == null) return; var dy = (cy || sy) - sy; sheet.style.transform = ""; if (dy > 80) closeSheet(); sy = cy = null; });
+    })();
 
     function refresh() {
       var on = connected();
       conn.textContent = on ? "Disconnect" : "Connect OpenRouter";
       conn.className = "btw-conn" + (on ? " on" : "");
-      sel.disabled = !on; ta.disabled = !on; sendBtn.disabled = !on;
+      sel.disabled = !on; ta.disabled = false; sendBtn.disabled = false; // typing allowed pre-connect; Send prompts to connect
       note.textContent = on
         ? "Connected. Replies use YOUR OpenRouter key (billed to you). Key stays in this tab's sessionStorage only."
         : "Connect your own OpenRouter account to chat. Your key stays in this tab only (sessionStorage) and you pay for usage.";
@@ -392,7 +424,13 @@
 
     var busy = false;
     async function submit() {
-      var q = ta.value.trim(); if (!q || busy || !connected()) return;
+      var q = ta.value.trim(); if (!q || busy) return;
+      if (!connected()) {
+        addMsg("assistant", "**Connect OpenRouter** first (button at the top of this panel) — then I can answer. Your key stays in this tab only and you pay for usage.");
+        conn.classList.add("pulse"); setTimeout(function () { conn.classList.remove("pulse"); }, 2200);
+        try { conn.focus(); } catch (e) {}
+        return;
+      }
       ta.value = ""; busy = true; sendBtn.disabled = true;
       addMsg("user", q); history.push({ role: "user", content: q }); saveHistory();
       var bot = addMsg("assistant", "…");
@@ -407,7 +445,7 @@
         else { bot.innerHTML = render(full); history.push({ role: "assistant", content: full }); saveHistory(); }
       } catch (e) {
         bot.innerHTML = render("⚠️ " + friendly(String(e && e.message || e)));
-      } finally { busy = false; sendBtn.disabled = !connected(); }
+      } finally { busy = false; sendBtn.disabled = false; }
     }
 
     // Handle an OAuth return (?code&state) landing back on this same page.
@@ -415,15 +453,15 @@
       var qs = new URLSearchParams(location.search);
       var code = qs.get("code"), state = qs.get("state");
       if (!code || !state || !sget(K_PKCE)) return;
-      try {
-        await exchangeCode(code, state);
-      } catch (e) { /* ignore; user can retry */ }
+      var exErr = null;
+      try { await exchangeCode(code, state); } catch (e) { exErr = String((e && e.message) || e); }
       // Scrub the code/state from the URL without reload.
       qs.delete("code"); qs.delete("state");
       var clean = location.pathname + (qs.toString() ? "?" + qs.toString() : "") + location.hash;
       history.length = 0;
       try { window.history.replaceState({}, document.title, clean); } catch (e) {}
       open();
+      if (exErr) addMsg("assistant", "⚠️ Could not finish connecting to OpenRouter (" + friendly(exErr) + "). Tap **Connect OpenRouter** to try again.");
     })();
 
     refresh();
