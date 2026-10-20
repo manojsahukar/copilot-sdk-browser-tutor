@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="/static/widget-page.css"><title>Why a client-side key is an XSS risk — Tutor Docs</title></head>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/">← Back to tutor</a></nav>
+<article>
+<h1>Why a client-side key is an XSS risk</h1>
+<p>Because the OpenRouter key lives in <code>sessionStorage</code>, it is readable by any JavaScript that runs on this page's origin. If an attacker could inject a script — a cross-site scripting (XSS) bug — that script could read <code>btw_or_key</code> and spend your OpenRouter credits. This is the honest trade-off of a backend-free, bring-your-own-key design.</p>
+<h2>Who bears the risk</h2>
+<p>The exposure is the <strong>visitor's own key and credits</strong>, not the site owner's. There is no shared server key to steal, and no other visitor is affected. Still, the site must avoid XSS, because an injected script on this origin can read the key.</p>
+<h2>How the widget reduces it</h2>
+<p>The pilot pages ship a strict <strong>meta-tag CSP</strong> (<code>script-src 'self'</code>, no <code>unsafe-inline</code>, no <code>eval</code>), so injected inline scripts will not run. Model replies are rendered through <code>marked</code> + <code>DOMPurify</code>, so a prompt-injected answer containing <code>&lt;script&gt;</code> or <code>&lt;img onerror&gt;</code> is neutralised, never executed. A meta CSP cannot set <code>frame-ancestors</code> or <code>report-uri</code>, so clickjacking protection still needs a real header on hosts that allow it.</p>
+<div class="callout">Keys in client-side storage are convenient and backend-free, but they are only as safe as the page is free of XSS. Treat the key as the visitor's to protect.</div>
+</article></div>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-context-selector="article" data-default-model="openrouter/auto" data-index="/widget/site-index.json"></script>
+</body></html>

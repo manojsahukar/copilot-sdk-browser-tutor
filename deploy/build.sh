@@ -2,6 +2,8 @@
 # Builds dist/browser-tutor.zip for Lambda (linux-x64, Node 22 runtime). Local only; no AWS calls.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Regenerate the widget's static site index so the shipped site-index.json is always current.
+node scripts/build-site-index.mjs public/widget --base /widget/ --out public/widget/site-index.json
 rm -rf dist && mkdir -p dist/pkg
 cp -r src public package.json package-lock.json dist/pkg/
 cp deploy/run.sh dist/pkg/run.sh

@@ -1,0 +1,16 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="/static/widget-page.css"><title>Privacy — what leaves your browser — Tutor Docs</title></head>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/">← Back to tutor</a></nav>
+<article>
+<h1>Privacy: what leaves your browser</h1>
+<p>Two things leave your browser, and only when you chat: the text you type, and the context the widget attaches — the visible text of the current page plus a few retrieved excerpts from this site's <code>site-index.json</code>. These go directly to OpenRouter over HTTPS, under your key. Nothing goes to the site owner, because there is no backend.</p>
+<h2>Page text is treated as data</h2>
+<p>The current page's text and the retrieved site excerpts are wrapped in explicit delimiters and stripped of control characters before being sent, and the system prompt tells the model to treat them as data, not instructions. This reduces prompt-injection from page content.</p>
+<h2>Where things are stored</h2>
+<p>Your key, chosen model and chat history all live in this tab's <code>sessionStorage</code> and are gone when the tab closes. See <a href="/widget/storage.html">where your key lives</a> for the exact key names.</p>
+</article></div>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-context-selector="article" data-default-model="openrouter/auto" data-index="/widget/site-index.json"></script>
+</body></html>

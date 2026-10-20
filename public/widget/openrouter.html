@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="/static/widget-page.css"><title>Who pays for the model — Tutor Docs</title></head>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/">← Back to tutor</a></nav>
+<article>
+<h1>Who pays for the model calls</h1>
+<p>The visitor pays. The widget uses <strong>your</strong> OpenRouter account via a key you authorize through OAuth, so every chat request is billed to your OpenRouter credits — never to the site owner. The site owner ships only static files and has no API key of their own in the page.</p>
+<h2>Default and free models</h2>
+<p>The default model is <code>openrouter/auto</code>, which routes to the best available model and <strong>may pick a paid model</strong>, billing your credits. The picker also lists free models such as <code>openrouter/free</code> and various <code>:free</code> models; these cost nothing but share a rate-limited pool, so they can be slower or return 429s.</p>
+<h2>Abuse and cost exposure</h2>
+<p>Because there is no server, the only cost exposure is the visitor's own key. There is no shared budget to drain and no server-side rate limit to tune; the natural limit is each visitor's own credits and OpenRouter's own per-key limits.</p>
+<div class="callout">To stop spending, tap <strong>Disconnect</strong> (which drops the key from this tab) and revoke the key at <code>openrouter.ai/settings/keys</code>.</div>
+</article></div>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-context-selector="article" data-default-model="openrouter/auto" data-index="/widget/site-index.json"></script>
+</body></html>

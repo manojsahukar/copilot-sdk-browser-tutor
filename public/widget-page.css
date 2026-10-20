@@ -1,0 +1,13 @@
+/* Minimal styling for the widget pilot article pages (external; CSP style-src 'self'). */
+:root { color-scheme: dark light; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 17px/1.65 Georgia, "Times New Roman", serif; color: #e6edf3; background: #0d1117; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 24px 20px 120px; }
+nav.site { font-family: system-ui, sans-serif; font-size: 14px; display: flex; flex-wrap: wrap; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid #222b36; margin-bottom: 24px; }
+nav.site a { color: #58a6ff; text-decoration: none; } nav.site a:hover { text-decoration: underline; }
+nav.site .brand { font-weight: 700; color: #e6edf3; }
+h1 { font-size: 30px; line-height: 1.2; } h2 { font-size: 22px; margin-top: 32px; } h3 { font-size: 18px; }
+p { margin: 14px 0; } code { font-family: ui-monospace, Menlo, monospace; background: #161b22; padding: 1px 5px; border-radius: 5px; font-size: .9em; }
+a { color: #58a6ff; } .muted { color: #8b949e; font-family: system-ui, sans-serif; font-size: 14px; }
+.callout { font-family: system-ui, sans-serif; font-size: 15px; background: #11161d; border: 1px solid #222b36; border-left: 3px solid #1f6feb; border-radius: 8px; padding: 12px 16px; margin: 20px 0; }
+@media (prefers-color-scheme: light) { body { color: #1b1f24; background: #fff; } nav.site { border-color: #e3e7ec; } nav.site .brand { color: #111; } code { background: #f3f5f8; } .callout { background: #f7f9fb; border-color: #e3e7ec; } }

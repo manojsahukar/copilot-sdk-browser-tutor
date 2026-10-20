@@ -73,7 +73,7 @@ Browser ──HTTPS──> CloudFront ──(X-Origin-Verify secret header)─�
 ## Security notes
 
 This project is itself a worked example of building an agent safely. The **[`/gotchas`](https://copilot-sdk.demo.curiosta.com/gotchas)**
-page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 16 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
+page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 17 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
 Accepted / Needs human) and a pointer to the code that handles each. Highlights:
 
 - **No model-generated JavaScript.** The model only returns text; live demos use a `run_demo` **enum** that maps a demo *name*
@@ -115,6 +115,48 @@ would bypass the allow-list and open the app to anyone with an OpenRouter accoun
 `openrouter/auto` router by default (with a clear paid-routing note); the curated list keeps free `:free` models one tap away because tool calling is required.
 
 
+## Client-side chat widget (static-site pilot)
+
+`/widget/` is a pilot of a **framework-free, backend-free chat widget** you can drop into any static site (e.g. GitHub Pages) with a single `<script>` tag. There are **zero calls back to this server**: the widget runs OpenRouter OAuth PKCE (S256) in the browser, holds the issued `sk-or` key in **sessionStorage only** (cleared on tab close; **Disconnect** wipes it), and calls `https://openrouter.ai/api/v1/chat/completions` directly with streaming (default `openrouter/auto`, free models in the picker). Replies render through the same vendored **marked + DOMPurify** pipeline (never raw `innerHTML`).
+
+It is **page-aware and site-aware**: it sends the current page's visible text (capped, control-chars stripped, delimited as data) and does lightweight in-browser **BM25 retrieval** over a build-time `site-index.json`, sending the top chunks and **citing the source pages as links**. It is isolated from the tutor's own server-side OpenRouter session — it uses its own `btw_*` storage keys and never touches `bt_sess` or `bt_chat`, and it is deliberately **not** GitHub-gated (the realistic static-site case). The only cost exposure is the visitor's own key.
+
+**Security on a header-less host.** The pilot pages ship a strict **meta-tag CSP** (`script-src 'self'; connect-src 'self' https://openrouter.ai`; no `unsafe-inline`/`eval`), so the widget uses a single external `widget.js` + `widget.css`, no inline handlers or styles, and no third-party scripts. A `<meta>` CSP **cannot** express `frame-ancestors` or `report-uri` — those still need a real header where the host allows it (this server also sends the CSP as a header, with `frame-ancestors`, as defence in depth). See the `client-side-byok-key` gotcha.
+
+**Embed it on your own GitHub Pages site.** Copy `widget.js`, `widget.css` and `vendor/` (marked + DOMPurify) into one folder, then add:
+
+```html
+<script src="/assets/widget.js"
+        data-site-name="My Docs"
+        data-context-selector="article"
+        data-default-model="openrouter/auto"
+        data-index="/site-index.json"></script>
+```
+
+`data-index` is optional (omit it for current-page-only answers). Build the index at deploy time:
+
+```bash
+node scripts/build-site-index.mjs ./_site --base / --out ./_site/site-index.json
+```
+
+In **GitHub Actions**, run that step after your static build and before publishing, e.g.:
+
+```yaml
+- name: Build site
+  run: <your static build, e.g. jekyll/hugo/vite>   # outputs ./_site
+- name: Build chat index
+  run: node scripts/build-site-index.mjs ./_site --base / --out ./_site/site-index.json
+- uses: actions/upload-pages-artifact@v3
+  with: { path: ./_site }
+```
+
+The script is dependency-free (plain Node), so no extra `npm install` is needed. Recommended CSP `<meta>` for the host pages:
+
+```html
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+```
+
 ## Run locally
 
 ```bash
@@ -139,6 +181,8 @@ node scripts/injection-tests.mjs   # prompt-injection vectors (UA, Referer, cook
 node scripts/openrouter-e2e.mjs    # mocked OpenRouter PKCE: login params, state rejection, exchange, key never exposed, disconnect
 node scripts/markdown-xss.mjs      # model output with <script>/<img onerror>/javascript: links is neutralised (marked + DOMPurify)
 node scripts/xss-lab-e2e.mjs       # XSS lab: payloads fire in vuln variants, blocked in fixed; isolation, frame-ancestors, no URL payloads (needs the lab origin on LAB_PORT)
+node scripts/widget-unit.mjs       # client-side widget: PKCE S256, BM25 retrieval, page-text cleaning, delimited context builder
+node scripts/widget-e2e.mjs        # widget pilot /widget/: loads under the meta CSP with zero violations; mocked OpenRouter connect -> chat stream (cited) -> disconnect wipes storage
 node scripts/e2e-mobile.mjs        # responsive checks at 360/390/768/1280 (needs: npm i --no-save puppeteer-core@23)
 ```
 
@@ -174,6 +218,7 @@ Teardown: `sam delete --stack-name browser-tutor --region "$AWS_REGION"`. See `d
 src/        server.mjs (routing, OAuth, sessions, origin lockdown, chat SSE), agent.mjs (SDK wiring, tools,
             refresh, sanitation), openrouter.mjs (OAuth PKCE + BYOK provider), appsecrets.mjs, serverview.mjs, prompt.mjs, gotchas.mjs, demos.mjs
 public/     static UI (index/app/demos/gotchas .html, probe.js, demos.js, chat.js, render.js, style.css)
+            widget.js + widget.css + widget/ (client-side OpenRouter chat widget pilot, site-index.json)
 deploy/     template.yaml (SAM), cert-template.yaml, build.sh, deploy.sh, run.sh
 scripts/    unit-tests, injection-tests, e2e-*
 docs/       HOSTING.md, RESEARCH.md, screenshots

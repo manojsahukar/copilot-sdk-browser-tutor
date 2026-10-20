@@ -117,12 +117,17 @@ function sameOrigin(req) {
   try { return new URL(o).host === req.headers.host || o === new URL(cfg.baseUrl).origin; } catch { return false; }
 }
 const scrubTokens = (s) => String(s).replace(/gh[opsur]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|sk-or-[A-Za-z0-9._-]+/g, "[redacted]");
-const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
-function serveStatic(res, file) {
+const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json; charset=utf-8" };
+function serveStatic(res, file, extra = {}) {
   const p = path.join(PUBLIC, path.normalize(file).replace(/^(\.\.[/\\])+/, ""));
   if (!p.startsWith(PUBLIC) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) return send(res, 404, { error: "not found" });
-  send(res, 200, fs.readFileSync(p), MIME[path.extname(p)] || "application/octet-stream");
+  send(res, 200, fs.readFileSync(p), MIME[path.extname(p)] || "application/octet-stream", extra);
 }
+// The widget pilot is a STATIC site that talks straight to OpenRouter, so its documents need a
+// different CSP than the app's strict "connect-src 'self'": connect to openrouter.ai is allowed.
+// This mirrors the page's own <meta> CSP (on real GitHub Pages only the meta applies — a host that
+// can't set headers; here we also send it as a header, with frame-ancestors, as defence in depth).
+const WIDGET_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const turnLog = new Map();
 function rateOk(sid) {
   const now = Date.now(); const arr = (turnLog.get(sid) || []).filter((t) => now - t < 3600e3);
@@ -216,6 +221,12 @@ async function handle(req, res) {
   if (p === "/api/gotchas") return send(res, 200, GOTCHAS);
   if (p === "/api/demos") return send(res, 200, { demos: DEMO_IDS.map((id) => DEMOS[id]), sibling: cfg.siblingUrl || null, lab: cfg.labUrl || null });
   if (p.startsWith("/static/")) return serveStatic(res, p.slice(8));
+
+  // Widget pilot: a STATIC site (article pages + the client-side OpenRouter chat widget).
+  // Served as plain files; the widget makes ZERO calls back to this server (it talks straight to OpenRouter).
+  if (p === "/widget") return redirect(res, "/widget/");
+  if (p === "/widget/") return serveStatic(res, "widget/index.html", { "Content-Security-Policy": WIDGET_CSP });
+  if (p.startsWith("/widget/")) return serveStatic(res, p.slice(1), p.endsWith(".html") ? { "Content-Security-Policy": WIDGET_CSP } : {});
 
   if (p === "/api/config") return send(res, 200, { devBypass: cfg.devBypass, oauthConfigured: oauthConfigured(), sibling: cfg.siblingUrl || null });
 

@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="/static/widget-page.css"><title>Tutor Docs — a client-side OpenRouter chat widget</title></head>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/">← Back to tutor</a></nav>
+<article>
+<h1>A chat widget that runs entirely in your browser</h1>
+<p class="muted">Pilot of the client-side OpenRouter widget — no backend, built to drop into any static GitHub Pages site.</p>
+<p>This documentation site is a live demo of a <strong>framework-free chat widget</strong> you can add to a static website with a single script tag. There is no server behind the chat: everything — signing in to OpenRouter, holding the key, calling the model, rendering the answer — happens in your browser.</p>
+<h2>How it works</h2>
+<p>Tap <strong>Ask</strong> in the corner, then <strong>Connect OpenRouter</strong>. The widget runs an OAuth PKCE flow and brings back a scoped <code>sk-or</code> key. Your messages go straight to <code>https://openrouter.ai/api/v1/chat/completions</code> with streaming. The default model is <code>openrouter/auto</code>, and you can switch to free models from the picker.</p>
+<h2>It reads this page, and the whole site</h2>
+<p>The widget sends the visible text of the page you are on as context, so it can answer questions about what you are reading. It also loads a small <code>site-index.json</code> built at deploy time and does lightweight in-browser retrieval (BM25) across every page, so it can answer site-wide questions and cite the page it used.</p>
+<p>Try asking: <em>"Where is my OpenRouter key stored?"</em>, <em>"Why is a client-side key an XSS risk?"</em>, or <em>"Who pays for the model calls?"</em> — the answer should link to the matching page.</p>
+<h2>Security model</h2>
+<p>The pilot pages are locked down with a <strong>meta-tag CSP</strong>: <code>script-src 'self'</code> and <code>connect-src 'self' https://openrouter.ai</code>, with no inline scripts, no inline styles and no eval. Model output is rendered through the vendored <code>marked</code> + <code>DOMPurify</code> pipeline, so a hostile reply cannot inject script. See the linked pages for where the key lives, the XSS trade-off, and who pays.</p>
+<div class="callout">This widget is deliberately separate from the Browser Tutor's own server-side OpenRouter session. It uses its own <code>btw_*</code> sessionStorage keys and never touches the tutor's login cookie or saved chat.</div>
+</article></div>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-context-selector="article" data-default-model="openrouter/auto" data-index="/widget/site-index.json"></script>
+</body></html>

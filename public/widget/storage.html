@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="/static/widget-page.css"><title>Where your OpenRouter key lives — Tutor Docs</title></head>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/">← Back to tutor</a></nav>
+<article>
+<h1>Where your OpenRouter key lives</h1>
+<p>When you connect OpenRouter in this widget, the issued <code>sk-or</code> key is stored in <strong>sessionStorage</strong> under the key name <code>btw_or_key</code>. sessionStorage is scoped to this one browser tab and this one origin, and it is <strong>cleared automatically when you close the tab</strong>.</p>
+<h2>Why sessionStorage and not a cookie</h2>
+<p>A cookie would be sent to the server on every request — but there is no server here, and we never want the key to leave your browser except in the Authorization header to OpenRouter itself. sessionStorage keeps the key client-side, per-tab, and short-lived. The <strong>Disconnect</strong> button wipes <code>btw_or_key</code>, the cached user id, the model choice and the chat history immediately.</p>
+<h2>What is NOT used</h2>
+<p>The widget never writes to <code>localStorage</code> (which would survive tab close) and never touches the tutor's own login cookie <code>bt_sess</code> or its saved transcript <code>bt_chat</code>. It only uses its own <code>btw_</code>-prefixed keys. Conversation history also lives only in sessionStorage and disappears when the tab closes.</p>
+<div class="callout">Rule of thumb: a key in sessionStorage is readable by any JavaScript running on this origin. That is the visitor's own risk, which the <a href="/widget/xss.html">XSS page</a> explains.</div>
+</article></div>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-context-selector="article" data-default-model="openrouter/auto" data-index="/widget/site-index.json"></script>
+</body></html>

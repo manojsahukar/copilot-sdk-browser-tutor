@@ -221,4 +221,19 @@ export const GOTCHAS = [
     ],
     verified: "build",
   },
+  {
+    id: "client-side-byok-key",
+    title: "A backend-free BYOK chat puts the API key in the visitor's browser",
+    status: "accepted",
+    what: "A static site (e.g. GitHub Pages) has no server to hold a secret, so to add an AI chat you either ship ONE shared API key in the page (it leaks to everyone and you pay for all usage) or have each visitor bring their own key. The pilot widget (run from /widget/) does the latter: OpenRouter OAuth PKCE (S256) runs entirely in the browser and the issued sk-or key is held client-side.",
+    risk: "A key in the browser cannot be HttpOnly: it sits in sessionStorage where ANY same-origin JavaScript can read it, so a single XSS on the page (or a malicious extension) could exfiltrate it and spend the VISITOR's OpenRouter credits. A meta-tag CSP (the only kind a header-less static host can set) also cannot express frame-ancestors or report-uri, so clickjacking/reporting still need real headers where available.",
+    app: "Accepted as the realistic static-site trade-off, and bounded: the key lives in sessionStorage ONLY (per-tab, wiped on tab close), under the widget's own btw_or_key — never a cookie, never localStorage, and never the tutor's bt_sess/bt_chat. Disconnect wipes the key, model and history and links the OpenRouter revoke page. The pilot pages carry a strict meta CSP (script-src 'self'; connect-src 'self' https://openrouter.ai; no unsafe-inline/eval) so injected inline scripts don't run, and model replies go through the vendored marked+DOMPurify pipeline so a prompt-injected answer can't execute. The visitor pays with their own key, so there is no shared budget to drain; the only cost exposure is the visitor's own credits. The widget is intentionally NOT GitHub-gated (that is the realistic static case). Tested headless: the page loads under the meta CSP with zero violations, and a mocked connect/chat/disconnect wipes storage (scripts/widget-e2e.mjs, scripts/widget-unit.mjs).",
+    fix: "browser-only OAuth PKCE + sessionStorage-only key with Disconnect/revoke (public/widget.js); strict meta CSP on the pilot pages (public/widget/*.html) mirrored as a header (src/server.mjs WIDGET_CSP); sanitised-Markdown rendering (public/widget.js marked+DOMPurify); isolation from the tutor session via btw_* keys.",
+    sources: [
+      { label: "OpenRouter OAuth PKCE (browser, user-owned key)", url: "https://openrouter.ai/docs/use-cases/oauth-pkce" },
+      { label: "MDN: Window.sessionStorage (per-tab, same-origin)", url: "https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage" },
+      { label: "MDN: CSP in a <meta> element (no frame-ancestors/report-uri)", url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy#using_the_http_header_and_the_meta_element" },
+    ],
+    verified: "build",
+  },
 ];
