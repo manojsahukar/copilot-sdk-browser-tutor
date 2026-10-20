@@ -11,6 +11,7 @@ import { appSecrets, oauthConfigured, refreshGitHubToken } from "./appsecrets.mj
 import { GOTCHAS } from "./gotchas.mjs";
 import { DEMOS, DEMO_IDS } from "./demos.mjs";
 import { OR_MODELS, OR_DEFAULT_MODEL, OR_REVOKE_URL, OR_KEY_RE, isAllowedModel, makeVerifier, challengeFor, authorizeUrl, exchangeCode, keySettingsUrl } from "./openrouter.mjs";
+import { isLab, handleLab, signLabToken } from "./xsslab.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "..", "public");
@@ -26,6 +27,9 @@ const cfg = {
   siblingHost: (process.env.SIBLING_HOST || "").toLowerCase(),
   siblingUrl: (process.env.SIBLING_URL || "").replace(/\/$/, ""),
   siblingPort: Number(process.env.SIBLING_PORT || 0),
+  labHost: (process.env.LAB_HOST || "").toLowerCase(),
+  labUrl: (process.env.LAB_URL || "").replace(/\/$/, ""),
+  labPort: Number(process.env.LAB_PORT || 0),
   cookieDomain: process.env.COOKIE_DOMAIN || "",
   sessionCapDays: 7, // session lifetime cap; access tokens are refreshed underneath (refresh token lasts 6 months)
 };
@@ -93,7 +97,7 @@ function send(res, code, body, type = "application/json", extra = {}) {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
-    "Content-Security-Policy": "default-src 'self'; img-src 'self' https://avatars.githubusercontent.com data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'" + (cfg.siblingUrl ? " " + cfg.siblingUrl : "") + "; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' https://avatars.githubusercontent.com data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'" + (cfg.siblingUrl ? " " + cfg.siblingUrl : "") + "; frame-src 'self'" + (cfg.labUrl ? " " + cfg.labUrl : "") + "; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(self), browsing-topics=()",
     ...extra,
   });
@@ -196,6 +200,7 @@ async function handle(req, res) {
   if (enforceOrigin && req.headers["x-origin-verify"] !== ORIGIN_VERIFY) return send(res, 403, { error: "Direct origin access is blocked; use the site via CloudFront." });
 
   if (isSibling(req)) return handleSibling(req, res, p);
+  if (isLab(req, cfg)) return handleLab(req, res, p, { mainOrigin: new URL(cfg.baseUrl).origin, key: KEY, secure });
   const sess = getSession(req);
 
   if (p === "/healthz/stream") {
@@ -209,7 +214,7 @@ async function handle(req, res) {
   if (p === "/gotchas" || p === "/gotchas/") return serveStatic(res, "gotchas.html");
   if (p === "/demos" || p === "/demos/") return serveStatic(res, "demos.html");
   if (p === "/api/gotchas") return send(res, 200, GOTCHAS);
-  if (p === "/api/demos") return send(res, 200, { demos: DEMO_IDS.map((id) => DEMOS[id]), sibling: cfg.siblingUrl || null });
+  if (p === "/api/demos") return send(res, 200, { demos: DEMO_IDS.map((id) => DEMOS[id]), sibling: cfg.siblingUrl || null, lab: cfg.labUrl || null });
   if (p.startsWith("/static/")) return serveStatic(res, p.slice(8));
 
   if (p === "/api/config") return send(res, 200, { devBypass: cfg.devBypass, oauthConfigured: oauthConfigured(), sibling: cfg.siblingUrl || null });
@@ -300,6 +305,9 @@ async function handle(req, res) {
       ? { connected: true, model: sess.or.model, models: OR_MODELS, default: OR_DEFAULT_MODEL, settingsUrl: keySettingsUrl(sess.or.key), revokeUrl: OR_REVOKE_URL }
       : { connected: false, models: OR_MODELS, default: OR_DEFAULT_MODEL },
   });
+
+  // Short-lived token that unlocks the lab's custom-payload box (only for a signed-in session).
+  if (p === "/api/lab") return send(res, 200, { labUrl: cfg.labUrl || null, token: cfg.labUrl ? signLabToken(KEY, sess.login) : null });
 
   // Choose the model engine (and, for OpenRouter, the model). GitHub identity is unchanged.
   if (p === "/api/provider" && req.method === "POST") {
@@ -409,3 +417,4 @@ function friendlyError(msg, provider) {
 const server = (req, res) => handle(req, res).catch((e) => { console.error(e); if (!res.headersSent) send(res, 500, { error: "server error" }); else res.end(); });
 http.createServer(server).listen(cfg.port, cfg.host, () => console.log(`browser-tutor listening on http://${cfg.host}:${cfg.port} (devBypass=${cfg.devBypass}, sibling=${cfg.siblingUrl || "none"})`));
 if (cfg.siblingPort) http.createServer(server).listen(cfg.siblingPort, cfg.host, () => console.log(`sibling listening on http://${cfg.host}:${cfg.siblingPort}`));
+if (cfg.labPort) http.createServer(server).listen(cfg.labPort, cfg.host, () => console.log(`xss-lab listening on http://${cfg.host}:${cfg.labPort}`));

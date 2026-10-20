@@ -30,6 +30,8 @@ Parameters:
   SiblingDomainName: { Type: String, Default: "", Description: "Second origin for cross-site demos, e.g. sibling.example.com" }
   SiblingCertificateArn: { Type: String, Default: "", Description: "ACM cert in us-east-1 for SiblingDomainName" }
   CookieDomain: { Type: String, Default: "", Description: "Parent domain shared by both sites, e.g. example.com, for the cross-site cookie demo" }
+  LabDomainName: { Type: String, Default: "", Description: "Isolated XSS-lab origin, e.g. xss-lab.example.com" }
+  LabCertificateArn: { Type: String, Default: "", Description: "ACM cert in us-east-1 for LabDomainName" }
 
 Conditions:
   HasBaseUrl: !Not [!Equals [!Ref BaseUrl, ""]]
@@ -38,6 +40,8 @@ Conditions:
   HasZone: !Not [!Equals [!Ref HostedZoneId, ""]]
   MainDns: !And [!Condition HasDomain, !Condition HasZone]
   SiblingDns: !And [!Condition HasSibling, !Condition HasZone]
+  HasLab: !Not [!Equals [!Ref LabDomainName, ""]]
+  LabDns: !And [!Condition HasLab, !Condition HasZone]
 
 Resources:
   TutorFunction:
@@ -72,6 +76,8 @@ Resources:
           SIBLING_HOST: !If [HasSibling, !Ref SiblingDomainName, ""]
           SIBLING_URL: !If [HasSibling, !Sub "https://${SiblingDomainName}", ""]
           COOKIE_DOMAIN: !Ref CookieDomain
+          LAB_HOST: !If [HasLab, !Ref LabDomainName, ""]
+          LAB_URL: !If [HasLab, !Sub "https://${LabDomainName}", ""]
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref GitHubOAuthSecretArn
@@ -205,6 +211,44 @@ Resources:
             - EventType: viewer-request
               FunctionARN: !GetAtt ViewerHeadersFunction.FunctionMetadata.FunctionARN
 
+  LabDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: HasLab
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: browser-tutor PoC (isolated XSS lab origin)
+        Aliases: [!Ref LabDomainName]
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_200
+        ViewerCertificate:
+          AcmCertificateArn: !Ref LabCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: fnurl
+            DomainName: !Select [2, !Split ["/", !GetAtt TutorFunctionUrl.FunctionUrl]]
+            OriginCustomHeaders:
+              - { HeaderName: X-Origin-Verify, HeaderValue: !Ref OriginVerify }
+              - { HeaderName: X-BT-Site, HeaderValue: xss-lab }
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: fnurl
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: !Ref OriginRequestPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt ViewerHeadersFunction.FunctionMetadata.FunctionARN
+
   DnsA:
     Type: AWS::Route53::RecordSet
     Condition: MainDns
@@ -238,6 +282,23 @@ Resources:
       Type: AAAA
       AliasTarget: { DNSName: !GetAtt SiblingDistribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
 
+  LabDnsA:
+    Type: AWS::Route53::RecordSet
+    Condition: LabDns
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref LabDomainName
+      Type: A
+      AliasTarget: { DNSName: !GetAtt LabDistribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
+  LabDnsAAAA:
+    Type: AWS::Route53::RecordSet
+    Condition: LabDns
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref LabDomainName
+      Type: AAAA
+      AliasTarget: { DNSName: !GetAtt LabDistribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
+
 Outputs:
   FunctionUrl:
     Value: !GetAtt TutorFunctionUrl.FunctionUrl
@@ -249,3 +310,6 @@ Outputs:
   SiblingUrl:
     Condition: HasSibling
     Value: !Sub "https://${SiblingDomainName}"
+  LabUrl:
+    Condition: HasLab
+    Value: !Sub "https://${LabDomainName}"

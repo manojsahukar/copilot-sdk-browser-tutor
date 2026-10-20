@@ -3,7 +3,10 @@ Description: Browser Tutor — ACM certificate for CloudFront (must live in us-e
 Parameters:
   DomainName: { Type: String, Description: "Main domain, e.g. tutor.example.com" }
   SiblingDomainName: { Type: String, Description: "Cross-site demo domain, e.g. sibling.example.com" }
+  LabDomainName: { Type: String, Default: "", Description: "Isolated XSS-lab domain, e.g. xss-lab.example.com" }
   HostedZoneId: { Type: String, Description: "Route 53 hosted zone id that owns both domains" }
+Conditions:
+  HasLab: !Not [!Equals [!Ref LabDomainName, ""]]
 Resources:
   Cert:
     Type: AWS::CertificateManager::Certificate
@@ -23,6 +26,19 @@ Resources:
         - DomainName: !Ref SiblingDomainName
           HostedZoneId: !Ref HostedZoneId
       Tags: [{ Key: project, Value: browser-tutor }]
+  LabCert:
+    Type: AWS::CertificateManager::Certificate
+    Condition: HasLab
+    Properties:
+      DomainName: !Ref LabDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref LabDomainName
+          HostedZoneId: !Ref HostedZoneId
+      Tags: [{ Key: project, Value: browser-tutor }]
 Outputs:
   CertificateArn: { Value: !Ref Cert }
   SiblingCertificateArn: { Value: !Ref SiblingCert }
+  LabCertificateArn:
+    Condition: HasLab
+    Value: !Ref LabCert

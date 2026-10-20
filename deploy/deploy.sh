@@ -46,6 +46,8 @@ sam deploy \
     ${HOSTED_ZONE_ID:+HostedZoneId="$HOSTED_ZONE_ID"} \
     ${SIBLING_DOMAIN_NAME:+SiblingDomainName="$SIBLING_DOMAIN_NAME"} \
     ${SIBLING_CERTIFICATE_ARN:+SiblingCertificateArn="$SIBLING_CERTIFICATE_ARN"} \
+    ${LAB_DOMAIN_NAME:+LabDomainName="$LAB_DOMAIN_NAME"} \
+    ${LAB_CERTIFICATE_ARN:+LabCertificateArn="$LAB_CERTIFICATE_ARN"} \
     ${COOKIE_DOMAIN:+CookieDomain="$COOKIE_DOMAIN"}
 aws cloudformation describe-stacks --stack-name browser-tutor --region "$AWS_REGION" --query 'Stacks[0].Outputs' --output table
 # Teardown: sam delete --stack-name browser-tutor --region "$AWS_REGION"

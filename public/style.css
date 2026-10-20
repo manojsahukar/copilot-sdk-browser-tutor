@@ -242,3 +242,11 @@ summary .status{margin-left:6px}
 .stor-tbl{width:100%;border-collapse:collapse;font-size:.78rem}
 .stor-tbl th,.stor-tbl td{border:1px solid #30363d;padding:4px 6px;text-align:left;word-break:break-all}
 .stor-cell .kv{font-size:.8rem}
+
+/* ===== Script injection lab card (Live demos) ===== */
+.lab-presets{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.lab-preset{font:inherit;font-size:.8rem;min-height:36px;padding:6px 10px;border-radius:999px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;cursor:pointer}
+.lab-preset:hover{background:#1f6feb22}
+.lab-preset:focus-visible{outline:2px solid #58a6ff;outline-offset:1px}
+.lab-frame{width:100%;height:560px;max-height:78dvh;border:1px solid #30363d;border-radius:10px;background:#0a0e14;margin:6px 0}
+@media(max-width:560px){.lab-frame{height:70dvh}}

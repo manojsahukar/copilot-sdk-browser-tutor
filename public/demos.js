@@ -121,6 +121,49 @@
     },
   };
 
+  function labCard(d, LAB) {
+    if (!LAB) return `<details class="card demo" open><summary><span class="gt-title">${esc(d.title)}</span><span class="badge docs">unavailable here</span></summary><div class="gt-body"><p>${esc(d.what)}</p><p class="muted">The isolated lab origin isn't configured in this environment.</p></div></details>`;
+    const presets = [
+      ["reflected", "vuln", "Reflected (vuln)"], ["reflected", "fixed", "Reflected (fixed)"],
+      ["stored", "vuln", "Stored (vuln)"], ["dom", "vuln", "DOM (vuln)"],
+      ["capabilities", "vuln", "What script can do"], ["defences", "x", "Defences"],
+      ["prompt", "vuln", "Prompt-inj (naive)"], ["prompt", "fixed", "Prompt-inj (safe)"],
+    ].map(([dm, v, l]) => `<button class="lab-preset" data-lab-demo="${dm}" data-lab-variant="${v}">${esc(l)}</button>`).join("");
+    return `<details class="card demo" open>
+      <summary><span class="gt-title">${esc(d.title)}</span><span class="badge build">contained · own origin</span></summary>
+      <div class="gt-body">
+        <p>${esc(d.what)}</p>
+        <h3>Kept contained here</h3><p>${esc(d.localOnly)}</p>
+        <div class="lab-presets">${presets}</div>
+        <iframe id="xsslab" class="lab-frame" title="Script injection lab" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="origin"></iframe>
+        <p class="muted" id="lab-status">loading the isolated lab…</p>
+        <details class="raw"><summary>How to defend (real world)</summary><p>${esc(d.revoke)}</p></details>
+      </div>
+    </details>`;
+  }
+
+  function setupLab(LAB) {
+    const frame = document.getElementById("xsslab"); if (!frame) return;
+    const labOrigin = new URL(LAB).origin;
+    let token = null, ready = false;
+    const results = { runs: [] };
+    const status = (t) => { const el = document.getElementById("lab-status"); if (el) el.textContent = t; };
+    frame.src = LAB + "/lab";
+    // fetch a short-lived login token to unlock the custom box (requires being signed in)
+    fetch("/api/lab").then((r) => (r.ok ? r.json() : null)).then((j) => { token = j && j.token; if (ready && token) frame.contentWindow.postMessage({ type: "bt-lab-init", token }, labOrigin); }).catch(() => {});
+    window.addEventListener("message", (e) => {
+      if (e.origin !== labOrigin) return;                       // only trust the lab origin
+      const d = e.data || {};
+      if (d.type === "bt-lab-ready") { ready = true; status("Lab ready. Use the buttons above, the controls inside the lab, or (signed in) the custom box."); if (token) frame.contentWindow.postMessage({ type: "bt-lab-init", token }, labOrigin); }
+      else if (d.type === "bt-lab-result") {
+        const last = { demo: d.demo, variant: d.variant, executed: !!d.executed, blocked: !!d.blocked, defence: d.defence || null };
+        results.runs = results.runs.concat([last]).slice(-20); results.last = last;
+        saveResult("xss_lab", results);                         // metadata only → the tutor
+      } else if (d.type === "csp-blocked") { results.cspBlocked = true; saveResult("xss_lab", results); }
+    });
+    document.querySelectorAll(".lab-preset").forEach((b) => (b.onclick = () => frame.contentWindow.postMessage({ type: "bt-lab-run", demo: b.dataset.labDemo, variant: b.dataset.labVariant }, labOrigin)));
+  }
+
   async function run(id, btn) {
     btn.disabled = true; const prev = btn.textContent; btn.textContent = "Running…";
     try { await RUNNERS[id](id); btn.textContent = "Run again"; }
@@ -132,11 +175,12 @@
     } finally { btn.disabled = false; }
   }
 
-  fetch("/api/demos").then((r) => r.json()).then(({ demos, sibling }) => {
-    SIB = sibling;
+  let LAB = null;
+  fetch("/api/demos").then((r) => r.json()).then(({ demos, sibling, lab }) => {
+    SIB = sibling; LAB = lab;
     document.getElementById("siteNote").textContent = sibling ? "Cross-site demos talk to the sibling origin " + sibling + "." : "Sibling origin not configured here; cross-site demos are disabled.";
     const wide = matchMedia("(min-width: 900px)").matches;
-    host.innerHTML = demos.map((d, i) => `
+    host.innerHTML = demos.map((d, i) => d.id === "xss_lab" ? labCard(d, LAB) : `
       <details class="card demo"${wide || i === 0 ? " open" : ""}>
         <summary><span class="gt-title">${esc(d.title)}</span>${d.needsPermission ? '<span class="badge docs">asks permission</span>' : '<span class="badge build">no prompt</span>'}</summary>
         <div class="gt-body">
@@ -150,5 +194,6 @@
         </div>
       </details>`).join("");
     host.querySelectorAll("[data-run]").forEach((b) => (b.onclick = () => run(b.dataset.run, b)));
+    if (LAB) setupLab(LAB);
   });
 })();

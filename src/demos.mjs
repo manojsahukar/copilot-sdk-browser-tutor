@@ -1,7 +1,7 @@
 // Curated demo library. The model can only pick a name from this enum; it never supplies code.
 // Each entry is metadata (what runs, what a site learns, how to revoke). Live demos run as STATIC client code
 // in /static/demos.js; only metadata ever comes back to the tutor via run_demo.
-export const DEMO_IDS = ["storage_inspector", "camera", "microphone", "geolocation", "cookie_jar", "cross_site_fetch"];
+export const DEMO_IDS = ["storage_inspector", "xss_lab", "camera", "microphone", "geolocation", "cookie_jar", "cross_site_fetch"];
 export const DEMOS = {
   storage_inspector: {
     id: "storage_inspector", title: "What this site stores in YOUR browser", needsPermission: false,
@@ -10,6 +10,14 @@ export const DEMOS = {
     localOnly: "Everything is read and shown in your own browser. Only METADATA goes to the tutor \u2014 key names, byte sizes, item/message counts, and your storage quota/usage. Never the stored content or previews.",
     teaches: "cookies (sent to the server on EVERY request; can be HttpOnly/Secure/SameSite/Domain-scoped) vs localStorage (stays in the browser, never sent automatically, readable by any same-origin JS \u2014 so one XSS or a browser extension exposes it) vs sessionStorage (per-tab, gone when the tab closes) vs IndexedDB (larger structured store). Same-origin scope: sibling.demo.curiosta.com CANNOT read copilot-sdk.demo.curiosta.com's localStorage even though it DOES receive the parent-domain cookie \u2014 cookies are Domain-scoped, Web Storage is strictly origin-scoped. Persistence/eviction: storage quotas, Safari ITP caps script-writable storage at ~7 days, and incognito clears on close. Relates to SDK gotcha #1 (an XSS on this origin would expose all of this).",
     revoke: "Inspect it yourself: DevTools \u2192 Application \u2192 Local Storage / Session Storage / IndexedDB / Cookies (Chrome & Firefox), or Safari Web Inspector \u2192 Storage; for Android Chrome use remote debugging (chrome://inspect on a desktop). Clear it: use this demo's 'Clear this site\u2019s stored data' button, Sign out, your browser's Site settings \u2192 Clear data, or clearing browsing data for this site.",
+  },
+  xss_lab: {
+    id: "xss_lab", title: "Script injection lab (contained XSS)", needsPermission: false,
+    what: "A deliberately vulnerable mini-site, embedded in an iframe, that lets you fire harmless cross-site-scripting (XSS) payloads and watch them execute \u2014 then see the same payloads neutralised by the safe pattern. Covers reflected, stored and DOM-based XSS, what injected script can do (read the JS-visible cookie, read localStorage, draw a fake login, log keystrokes, 'exfiltrate'), defences (strict CSP with securitypolicyviolation events, HttpOnly, DOMPurify, Trusted Types), and prompt-injection-to-XSS through the app's real marked+DOMPurify pipeline.",
+    siteLearns: "Nothing about you \u2014 every value is dummy. The lesson is how an XSS bug turns 'just text' into attacker code running in a page's origin, and why each defence stops it.",
+    localOnly: "The lab runs on its OWN throwaway origin (never the main site), is only usable when framed by the tutor, ignores anything in the URL (no shareable attack links), sets only labelled host-only dummy cookies, and can only 'exfiltrate' to its own echo endpoint. The tutor receives metadata only: which payload ran, whether it executed or was blocked, and which defence stopped it.",
+    teaches: "Isolation is the whole point: a vulnerable page must live on a dedicated origin with its own headers, the main session cookie must be host-only so it never reaches the lab, payloads must never come from the URL, the lab must only run when framed by the trusted app, and 'exfiltration' must be boxed in. Compare the vulnerable innerHTML/javascript: sinks with textContent, scheme validation, strict CSP, HttpOnly and DOMPurify.",
+    revoke: "This is a lab, not a permission. In the real world: escape/encode output (textContent), sanitise HTML (DOMPurify), set a strict Content-Security-Policy (script-src 'self', no inline), mark session cookies HttpOnly + Secure + SameSite, validate URL schemes, and consider Trusted Types.",
   },
   camera: {
     id: "camera", title: "Camera access", needsPermission: true,

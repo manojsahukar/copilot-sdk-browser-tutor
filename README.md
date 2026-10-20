@@ -32,6 +32,11 @@ only metadata back to the tutor.
 - **Active signals** JavaScript can read: screen, timezone, languages, canvas/WebGL hashes, fonts, media-device counts, permission states.
 - **Permissioned capabilities** via the live demos: camera, microphone, geolocation (all local-only; only metadata is reported),
   and **cross-site behaviour** against a genuinely separate "sibling" origin (CORS vs no-CORS reads, and a shared-parent cookie).
+- **Script injection (contained XSS lab)**: a `run_demo` `xss_lab` demo embeds a deliberately vulnerable mini-site on a dedicated,
+  isolated origin (`xss-lab.demo.curiosta.com`) and shows reflected/stored/DOM XSS, what injected script can do, the defences (escaping,
+  DOMPurify, strict CSP + `securitypolicyviolation`, HttpOnly, scheme checks, Trusted Types), and prompt-injection-to-XSS — each with a
+  vulnerable vs fixed variant. It is isolated so curiosta.com never becomes a real XSS/phishing host (own origin, host-only session
+  cookie, no URL-borne payloads, only usable when framed by the app, echo-only exfiltration).
 - **Where your data lives in the browser**: a `storage_inspector` demo shows this site's own localStorage (including the saved chat
   transcript — key name, size, message count, expiry), sessionStorage, IndexedDB and the JS-visible cookies (the HttpOnly `bt_sess`
   session cookie is deliberately absent), plus quota via `navigator.storage.estimate()` — and explains cookies vs Web Storage, origin
@@ -68,7 +73,7 @@ Browser ──HTTPS──> CloudFront ──(X-Origin-Verify secret header)─�
 ## Security notes
 
 This project is itself a worked example of building an agent safely. The **[`/gotchas`](https://copilot-sdk.demo.curiosta.com/gotchas)**
-page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 15 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
+page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 16 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
 Accepted / Needs human) and a pointer to the code that handles each. Highlights:
 
 - **No model-generated JavaScript.** The model only returns text; live demos use a `run_demo` **enum** that maps a demo *name*
@@ -133,6 +138,7 @@ node scripts/unit-tests.mjs        # mode:"empty" assertion + deny-by-default pe
 node scripts/injection-tests.mjs   # prompt-injection vectors (UA, Referer, cookie name) are neutralised; secret masking
 node scripts/openrouter-e2e.mjs    # mocked OpenRouter PKCE: login params, state rejection, exchange, key never exposed, disconnect
 node scripts/markdown-xss.mjs      # model output with <script>/<img onerror>/javascript: links is neutralised (marked + DOMPurify)
+node scripts/xss-lab-e2e.mjs       # XSS lab: payloads fire in vuln variants, blocked in fixed; isolation, frame-ancestors, no URL payloads (needs the lab origin on LAB_PORT)
 node scripts/e2e-mobile.mjs        # responsive checks at 360/390/768/1280 (needs: npm i --no-save puppeteer-core@23)
 ```
 
