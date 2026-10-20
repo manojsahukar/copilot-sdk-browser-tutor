@@ -34,7 +34,11 @@
 
   // Own storage keys (never bt_sess / bt_chat).
   var K_KEY = "btw_or_key", K_UID = "btw_or_uid", K_MODEL = "btw_model",
-      K_CHAT = "btw_chat", K_PKCE = "btw_pkce";
+      K_CHAT = "btw_chat", K_PKCE = "btw_pkce",
+      // localStorage (survives a new tab / Custom Tab / installed-app return):
+      K_REMEMBER = "btw_remember", K_PERSIST = "btw_or_key_persist", K_DEBUG = "btw_debug";
+  var PKCE_TTL = 10 * 60 * 1000;            // matches OpenRouter's 10-minute code expiry
+  var REMEMBER_TTL = 7 * 24 * 3600 * 1000;  // opt-in "remember on this device"
 
   // Curated models for the picker. Default Auto; includes free models.
   var MODELS = [
@@ -163,6 +167,45 @@
   function sget(k) { var s = ss(); try { return s ? s.getItem(k) : null; } catch (e) { return null; } }
   function sset(k, v) { var s = ss(); try { if (s) s.setItem(k, v); } catch (e) {} }
   function sdel(k) { var s = ss(); try { if (s) s.removeItem(k); } catch (e) {} }
+  function ls() { try { return window.localStorage; } catch (e) { return null; } }
+  function lget(k) { var s = ls(); try { return s ? s.getItem(k) : null; } catch (e) { return null; } }
+  function lset(k, v) { var s = ls(); try { if (s) s.setItem(k, v); } catch (e) {} }
+  function ldel(k) { var s = ls(); try { if (s) s.removeItem(k); } catch (e) {} }
+
+  // ---- debug trace (?btw_debug=1 turns it on, sticky across the OAuth round-trip; ?btw_debug=0 off) ----
+  // Never records the authorization code or the key: only presence, lengths-free status and HTTP codes.
+  var DBG = [], DBG_EL = null;
+  function dbg(line) { DBG.push(new Date().toISOString().slice(11, 19) + "  " + line); if (DBG_EL) DBG_EL.textContent = DBG.join("\n"); }
+
+  // ---- OAuth callback capture: runs immediately on load, BEFORE any UI or asset loading ----
+  var CALLBACK = null;
+  (function captureCallback() {
+    var qs; try { qs = new URLSearchParams(location.search); } catch (e) { return; }
+    if (qs.has("btw_debug")) { if (qs.get("btw_debug") === "0") ldel(K_DEBUG); else lset(K_DEBUG, "1"); qs.delete("btw_debug"); }
+    var code = qs.get("code"), state = qs.get("state"), err = qs.get("error");
+    // Only treat it as OUR callback if it carries a state or we have a pending sign-in (so a host page's
+    // own ?code= is never hijacked).
+    var ours = (code || err) && (state || lget(K_PKCE));
+    if (ours) {
+      CALLBACK = { code: code, state: state, error: err };
+      ["code", "state", "error", "error_description"].forEach(function (k) { qs.delete(k); });
+    }
+    if (ours || location.search !== (qs.toString() ? "?" + qs.toString() : "")) {
+      // Scrub the one-time code (and the debug flag) from the address bar and history right away.
+      try { window.history.replaceState(window.history.state, document.title, location.pathname + (qs.toString() ? "?" + qs.toString() : "") + location.hash); } catch (e) {}
+    }
+    if (lget(K_DEBUG) === "1") {
+      dbg("debug on; page " + location.pathname);
+      dbg("pending sign-in in localStorage: " + (lget(K_PKCE) ? "yes" : "no"));
+      if (CALLBACK) dbg("callback detected: code " + (CALLBACK.code ? "present" : "absent") + ", state " + (CALLBACK.state ? "present" : "absent") + (CALLBACK.error ? ", error=" + String(CALLBACK.error).slice(0, 40) : ""));
+    }
+  })();
+  // Restore an opted-in remembered key into this tab (expired ones are purged).
+  (function restoreRemembered() {
+    if (sget(K_KEY)) return;
+    var raw = lget(K_PERSIST); if (!raw) return;
+    try { var p = JSON.parse(raw); if (p && p.k && p.exp > Date.now()) { sset(K_KEY, p.k); dbg("restored remembered key (expires " + new Date(p.exp).toISOString().slice(0, 10) + ")"); } else ldel(K_PERSIST); } catch (e) { ldel(K_PERSIST); }
+  })();
 
   var cfg = {
     siteName: (ME && ME.getAttribute("data-site-name")) || "this site",
@@ -229,31 +272,68 @@
   async function prepareAuth() {
     var verifier = makeVerifier(), state = randState();
     var challenge = await pkceChallenge(verifier);
-    sset(K_PKCE, JSON.stringify({ v: verifier, st: state, t: Date.now() }));
+    // localStorage (not sessionStorage) so the verifier survives the return landing in a NEW tab, a Custom
+    // Tab or an installed-app context. Short TTL, one-time: deleted the moment the callback reads it.
+    lset(K_PKCE, JSON.stringify({ v: verifier, st: state, t: Date.now(), exp: Date.now() + PKCE_TTL }));
     var u = new URL(OR_AUTH);
     u.searchParams.set("callback_url", location.origin + location.pathname);
     u.searchParams.set("code_challenge", challenge);
     u.searchParams.set("code_challenge_method", "S256");
     u.searchParams.set("state", state);
+    dbg("sign-in started; verifier stored (10 min, one-time); redirecting to OpenRouter");
     return u.toString();
   }
-  // Exchange a returned ?code for an sk-or key. Verifies state. Stores key in sessionStorage only.
-  async function exchangeCode(code, state) {
-    var raw = sget(K_PKCE); sdel(K_PKCE);
-    var pk = raw ? JSON.parse(raw) : null;
-    if (!pk || !pk.v || pk.st !== state) throw new Error("state mismatch");
-    var r = await fetch(OR_KEYS, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: code, code_verifier: pk.v, code_challenge_method: "S256" })
-    });
-    var j = await r.json().catch(function () { return {}; });
-    if (!r.ok || !j.key) throw new Error("exchange failed (HTTP " + r.status + ")");
-    sset(K_KEY, j.key);
-    if (j.user_id) sset(K_UID, String(j.user_id));
-    return true;
+  function storeKey(key, uid) {
+    sset(K_KEY, key);
+    if (uid) sset(K_UID, String(uid));
+    if (lget(K_REMEMBER) === "1") lset(K_PERSIST, JSON.stringify({ k: key, exp: Date.now() + REMEMBER_TTL }));
   }
+  // Complete an OAuth return. Never throws; resolves {ok, error} so the UI can always say what happened.
+  async function runCallback(cb) {
+    var raw = lget(K_PKCE); ldel(K_PKCE); // one-time
+    var pk = null; try { pk = raw ? JSON.parse(raw) : null; } catch (e) {}
+    if (!cb.code) {
+      dbg("authorization: not granted" + (cb.error ? " (" + String(cb.error).slice(0, 40) + ")" : ""));
+      return { ok: false, error: "OpenRouter sign-in was cancelled or denied" + (cb.error ? " (" + String(cb.error).slice(0, 60) + ")" : "") + ". Tap Connect OpenRouter to try again." };
+    }
+    if (!pk || !pk.v) {
+      dbg("stored verifier: MISSING");
+      return { ok: false, error: "This sign-in wasn't started in this browser (or its site data was cleared), so it can't be completed here. Tap Connect OpenRouter to start again from this page." };
+    }
+    if (!pk.exp || pk.exp < Date.now()) {
+      dbg("stored verifier: EXPIRED");
+      return { ok: false, error: "The sign-in took longer than 10 minutes and expired. Tap Connect OpenRouter to try again." };
+    }
+    dbg("stored verifier: present (started " + Math.round((Date.now() - (pk.t || Date.now())) / 1000) + "s ago)");
+    if (!cb.state || cb.state !== pk.st) {
+      dbg("state match: NO — rejected, no exchange attempted");
+      return { ok: false, error: "Security check failed: the sign-in response didn't match the request (state mismatch). Tap Connect OpenRouter to try again." };
+    }
+    dbg("state match: yes; exchanging code at openrouter.ai");
+    var r, j;
+    try {
+      r = await fetch(OR_KEYS, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: cb.code, code_verifier: pk.v, code_challenge_method: "S256" }) });
+      j = await r.json().catch(function () { return {}; });
+    } catch (e) {
+      dbg("exchange: network error");
+      return { ok: false, error: "Couldn't reach OpenRouter to finish connecting (" + String((e && e.message) || e) + "). Check your connection and tap Connect OpenRouter again." };
+    }
+    dbg("exchange: HTTP " + r.status + (j && j.key ? " (key received)" : ""));
+    if (!r.ok || !j || !j.key) {
+      var m = (j && j.error && (j.error.message || j.error)) || j.message || "no key returned";
+      return { ok: false, error: "OpenRouter said: \u201c" + String(m).replace(/sk-or-[A-Za-z0-9._-]+/g, "[redacted]").slice(0, 200) + "\u201d (HTTP " + r.status + "). Tap Connect OpenRouter to try again." };
+    }
+    storeKey(j.key, j.user_id);
+    dbg("key stored in this tab's sessionStorage" + (lget(K_REMEMBER) === "1" ? " + remembered on this device (7 days)" : ""));
+    return { ok: true };
+  }
+  // Kept for tests/back-compat: throws on failure.
+  async function exchangeCode(code, state) { var r = await runCallback({ code: code, state: state }); if (!r.ok) throw new Error(r.error); return true; }
   function connected() { return !!sget(K_KEY); }
-  function disconnect() { [K_KEY, K_UID, K_CHAT, K_MODEL].forEach(sdel); }
+  function disconnect() { [K_KEY, K_UID, K_CHAT, K_MODEL].forEach(sdel); ldel(K_PERSIST); ldel(K_REMEMBER); ldel(K_PKCE); }
+  // Start the code exchange NOW, in parallel with loading the UI assets, so nothing can skip it.
+  var EXCHANGE = CALLBACK ? runCallback(CALLBACK) : null;
 
   // ------------------------------ chat (stream) -----------------------------
   async function streamChat(messages, model, onDelta, signal) {
@@ -334,13 +414,21 @@
 
     var log = h("div", "btw-log"); log.setAttribute("aria-live", "polite");
     var note = h("div", "btw-note");
+    var remWrap = h("label", "btw-remember");
+    var rem = document.createElement("input"); rem.type = "checkbox"; rem.checked = lget(K_REMEMBER) === "1";
+    var remTxt = h("span", null, "Remember on this device for 7 days (stores the key in localStorage: any script on this site could read it until it expires — only on your own device).");
+    remWrap.appendChild(rem); remWrap.appendChild(remTxt);
+    var dbgEl = null;
+    if (lget(K_DEBUG) === "1") { dbgEl = h("pre", "btw-debug"); dbgEl.setAttribute("aria-label", "Debug trace"); DBG_EL = dbgEl; dbgEl.textContent = DBG.join("\n"); }
     var form = document.createElement("form"); form.className = "btw-composer";
     var ta = document.createElement("textarea"); ta.className = "btw-input"; ta.rows = 1;
     ta.setAttribute("placeholder", "Ask about " + cfg.siteName + "…"); ta.setAttribute("aria-label", "Message"); ta.maxLength = 2000;
     var sendBtn = h("button", "btw-send", "Send"); sendBtn.type = "submit";
     form.appendChild(ta); form.appendChild(sendBtn);
 
-    sheet.appendChild(grip); sheet.appendChild(head); sheet.appendChild(note); sheet.appendChild(log); sheet.appendChild(form);
+    sheet.appendChild(grip); sheet.appendChild(head); sheet.appendChild(note); sheet.appendChild(remWrap);
+    if (dbgEl) sheet.appendChild(dbgEl);
+    sheet.appendChild(log); sheet.appendChild(form);
     root.appendChild(fab); root.appendChild(backdrop); root.appendChild(sheet);
     document.body.appendChild(root);
 
@@ -389,8 +477,11 @@
       conn.textContent = on ? "Disconnect" : "Connect OpenRouter";
       conn.className = "btw-conn" + (on ? " on" : "");
       sel.disabled = !on; ta.disabled = false; sendBtn.disabled = false; // typing allowed pre-connect; Send prompts to connect
+      rem.checked = lget(K_REMEMBER) === "1";
       note.textContent = on
-        ? "Connected. Replies use YOUR OpenRouter key (billed to you). Key stays in this tab's sessionStorage only."
+        ? (lget(K_REMEMBER) === "1"
+            ? "Connected. Replies use YOUR OpenRouter key (billed to you). Remembered on this device for 7 days (localStorage) — untick to forget it."
+            : "Connected. Replies use YOUR OpenRouter key (billed to you). Key stays in this tab's sessionStorage only.")
         : "Connect your own OpenRouter account to chat. Your key stays in this tab only (sessionStorage) and you pay for usage.";
       if (on && !log.childElementCount && !history.length) addMsg("assistant", "Hi! Ask me anything about **" + cfg.siteName + "**. I can use the current page and search the rest of the site.");
     }
@@ -402,6 +493,16 @@
       catch (e) { conn.disabled = false; refresh(); addMsg("assistant", "Could not start the OpenRouter sign-in."); }
     });
     sel.addEventListener("change", function () { sset(K_MODEL, sel.value); });
+    rem.addEventListener("change", function () {
+      if (rem.checked) { lset(K_REMEMBER, "1"); setTimeout(refresh, 0); var k = sget(K_KEY); if (k) lset(K_PERSIST, JSON.stringify({ k: k, exp: Date.now() + REMEMBER_TTL })); dbg("remember on this device: ON"); }
+      else { ldel(K_REMEMBER); ldel(K_PERSIST); setTimeout(refresh, 0); dbg("remember on this device: OFF (persisted key removed)"); }
+    });
+    // If the OAuth return finished in ANOTHER tab with "remember" on, pick the key up here too.
+    window.addEventListener("storage", function (e) {
+      if (e.key === K_PERSIST && e.newValue && !connected()) {
+        try { var p = JSON.parse(e.newValue); if (p && p.k && p.exp > Date.now()) { sset(K_KEY, p.k); refresh(); addMsg("assistant", "✅ Connected (finished in another tab)."); } } catch (x) {}
+      }
+    });
 
     ta.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
@@ -448,25 +549,20 @@
       } finally { busy = false; sendBtn.disabled = false; }
     }
 
-    // Handle an OAuth return (?code&state) landing back on this same page.
-    (async function handleReturn() {
-      var qs = new URLSearchParams(location.search);
-      var code = qs.get("code"), state = qs.get("state");
-      if (!code || !state || !sget(K_PKCE)) return;
-      var exErr = null;
-      try { await exchangeCode(code, state); } catch (e) { exErr = String((e && e.message) || e); }
-      // Scrub the code/state from the URL without reload.
-      qs.delete("code"); qs.delete("state");
-      var clean = location.pathname + (qs.toString() ? "?" + qs.toString() : "") + location.hash;
+    // OAuth return: the exchange already started before the UI loaded. Show the outcome in the sheet.
+    if (EXCHANGE) {
       history.length = 0;
-      try { window.history.replaceState({}, document.title, clean); } catch (e) {}
-      open();
-      if (exErr) addMsg("assistant", "⚠️ Could not finish connecting to OpenRouter (" + friendly(exErr) + "). Tap **Connect OpenRouter** to try again.");
-    })();
+      EXCHANGE.then(function (res) {
+        open();
+        if (res.ok) { refresh(); addMsg("assistant", "✅ **Connected to OpenRouter.** Ask me anything about **" + cfg.siteName + "** — replies are billed to your OpenRouter credits."); }
+        else { refresh(); addMsg("assistant", "⚠️ " + res.error); }
+      });
+    }
 
     refresh();
     G.__btwUI = { open: open, close: closeSheet, refresh: refresh, submit: submit, addMsg: addMsg,
-      prepareAuth: prepareAuth, exchangeCode: exchangeCode, connected: connected, disconnect: disconnect,
+      prepareAuth: prepareAuth, exchangeCode: exchangeCode, runCallback: runCallback, connected: connected, disconnect: disconnect,
+      exchangeDone: function () { return EXCHANGE ? EXCHANGE.then(function (r) { return r; }) : Promise.resolve(null); },
       ensureIndex: ensureIndex, getIndex: function () { return INDEX; }, render: render,
       setInput: function (v) { ta.value = v; }, els: { ta: ta, log: log, sel: sel } };
   }

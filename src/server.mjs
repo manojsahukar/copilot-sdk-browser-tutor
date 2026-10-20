@@ -224,7 +224,7 @@ async function handle(req, res) {
 
   // Widget pilot: a STATIC site (article pages + the client-side OpenRouter chat widget).
   // Served as plain files; the widget makes ZERO calls back to this server (it talks straight to OpenRouter).
-  if (p === "/widget") return redirect(res, "/widget/");
+  if (p === "/widget") return redirect(res, "/widget/" + url.search); // keep ?code&state on the OAuth return
   if (p === "/widget/") return serveStatic(res, "widget/index.html", { "Content-Security-Policy": WIDGET_CSP });
   if (p.startsWith("/widget/")) return serveStatic(res, p.slice(1), p.endsWith(".html") ? { "Content-Security-Policy": WIDGET_CSP } : {});
 

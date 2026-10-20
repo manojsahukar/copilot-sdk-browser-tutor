@@ -114,7 +114,7 @@ must(!rr.s && !rr.i && !rr.o && !rr.j && rr.pwned === 0, "renderer strips <scrip
 must(/noopener/.test(rr.rel || ""), "safe links keep rel=noopener");
 
 // OAuth return -> key stored
-const state = await p.evaluate(async () => { await window.__btwUI.prepareAuth(); return JSON.parse(sessionStorage.getItem("btw_pkce")).st; });
+const state = await p.evaluate(async () => { await window.__btwUI.prepareAuth(); return JSON.parse(localStorage.getItem("btw_pkce")).st; });
 await p.goto(PAGE + "?code=goodcode&state=" + encodeURIComponent(state), { waitUntil: "networkidle0" });
 await p.waitForFunction(() => !!window.__btwUI, { timeout: 15000 });
 await p.waitForFunction(() => !!sessionStorage.getItem("btw_or_key"), { timeout: 8000 });

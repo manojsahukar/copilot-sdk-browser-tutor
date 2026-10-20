@@ -117,7 +117,7 @@ would bypass the allow-list and open the app to anyone with an OpenRouter accoun
 
 ## Client-side chat widget (static-site pilot)
 
-`/widget/` is a pilot of a **framework-free, backend-free chat widget** you can drop into any static site (e.g. GitHub Pages) with a single `<script>` tag. There are **zero calls back to this server**: the widget runs OpenRouter OAuth PKCE (S256) in the browser, holds the issued `sk-or` key in **sessionStorage only** (cleared on tab close; **Disconnect** wipes it), and calls `https://openrouter.ai/api/v1/chat/completions` directly with streaming (default `openrouter/auto`, free models in the picker). Replies render through the same vendored **marked + DOMPurify** pipeline (never raw `innerHTML`).
+`/widget/` is a pilot of a **framework-free, backend-free chat widget** you can drop into any static site (e.g. GitHub Pages) with a single `<script>` tag. There are **zero calls back to this server**: the widget runs OpenRouter OAuth PKCE (S256) in the browser, holds the issued `sk-or` key in **sessionStorage** by default (cleared on tab close; **Disconnect** wipes it; opt-in *Remember on this device* keeps a 7-day copy in localStorage). The PKCE verifier + state sit in localStorage for ≤10 minutes, one-time, so the OAuth return still works when it lands in a new tab/Custom Tab on Android; add `?btw_debug=1` to see the callback steps (never the code or key), and calls `https://openrouter.ai/api/v1/chat/completions` directly with streaming (default `openrouter/auto`, free models in the picker). Replies render through the same vendored **marked + DOMPurify** pipeline (never raw `innerHTML`).
 
 It is **page-aware and site-aware**: it sends the current page's visible text (capped, control-chars stripped, delimited as data) and does lightweight in-browser **BM25 retrieval** over a build-time `site-index.json`, sending the top chunks and **citing the source pages as links**. It is isolated from the tutor's own server-side OpenRouter session — it uses its own `btw_*` storage keys and never touches `bt_sess` or `bt_chat`, and it is deliberately **not** GitHub-gated (the realistic static-site case). The only cost exposure is the visitor's own key.
 
@@ -183,6 +183,7 @@ node scripts/markdown-xss.mjs      # model output with <script>/<img onerror>/ja
 node scripts/xss-lab-e2e.mjs       # XSS lab: payloads fire in vuln variants, blocked in fixed; isolation, frame-ancestors, no URL payloads (needs the lab origin on LAB_PORT)
 node scripts/widget-unit.mjs       # client-side widget: PKCE S256, BM25 retrieval, page-text cleaning, delimited context builder
 node scripts/widget-e2e.mjs        # widget pilot: real-touch mobile open/close/reopen (backdrop, Android back), no overflow, 44px targets, pre-connect prompt; mocked connect -> chat (cited) -> disconnect
+node scripts/widget-oauth-e2e.mjs       # OAuth return in a NEW tab completes; state mismatch / missing / expired / denied all shown; /widget + /widget/index.html; debug trace never leaks; remember opt-in; REAL bogus-code error surfaced
 node scripts/widget-openrouter-live.mjs  # widget against the REAL OpenRouter (no key): auth/keys dummy -> readable 400, chat bogus key -> readable 401, CORS/CSP ok (errors surface, not silent)
 node scripts/e2e-mobile.mjs        # responsive checks at 360/390/768/1280 (needs: npm i --no-save puppeteer-core@23)
 ```
