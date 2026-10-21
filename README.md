@@ -117,7 +117,7 @@ would bypass the allow-list and open the app to anyone with an OpenRouter accoun
 
 ## Client-side chat widget (static-site pilot)
 
-`/widget/` is a pilot of a **framework-free, backend-free chat widget** you can drop into any static site (e.g. GitHub Pages) with a single `<script>` tag. There are **zero calls back to this server**: the widget runs OpenRouter OAuth PKCE (S256) in the browser, holds the issued `sk-or` key in **sessionStorage** by default (cleared on tab close; **Disconnect** wipes it; opt-in *Remember on this device* keeps a 7-day copy in localStorage). The PKCE verifier + state sit in localStorage for ≤10 minutes, one-time, so the OAuth return still works when it lands in a new tab/Custom Tab on Android; add `?btw_debug=1` to see the callback steps (never the code or key), and calls `https://openrouter.ai/api/v1/chat/completions` directly with streaming (default `openrouter/auto`, free models in the picker). Replies render through the same vendored **marked + DOMPurify** pipeline (never raw `innerHTML`).
+`/widget/` is a pilot of a **framework-free, backend-free chat widget** you can drop into any static site (e.g. GitHub Pages) with a single `<script>` tag. There are **zero calls back to this server**: the widget runs OpenRouter OAuth PKCE (S256) in the browser, holds the issued `sk-or` key in **sessionStorage** by default (cleared on tab close; **Disconnect** wipes it; opt-in *Remember on this device* keeps a 7-day copy in localStorage). The PKCE verifier + state sit in localStorage for ≤10 minutes, one-time, so the OAuth return still works when it lands in a new tab/Custom Tab on Android; add `?btw_debug=1` to see the callback steps (never the code or key), and calls `https://openrouter.ai/api/v1/chat/completions` directly with streaming (default `openrouter/free` = *Auto (free models only)*; *Auto (best available)* `openrouter/auto` and individual free models stay in the picker). Replies render through the same vendored **marked + DOMPurify** pipeline (never raw `innerHTML`).
 
 It is **page-aware and site-aware**: it sends the current page's visible text (capped, control-chars stripped, delimited as data) and does lightweight in-browser **BM25 retrieval** over a build-time `site-index.json`, sending the top chunks and **citing the source pages as links**. It is isolated from the tutor's own server-side OpenRouter session — it uses its own `btw_*` storage keys and never touches `bt_sess` or `bt_chat`, and it is deliberately **not** GitHub-gated (the realistic static-site case). The only cost exposure is the visitor's own key.
 
@@ -129,7 +129,7 @@ It is **page-aware and site-aware**: it sends the current page's visible text (c
 <script src="/assets/widget.js"
         data-site-name="My Docs"
         data-context-selector="article"
-        data-default-model="openrouter/auto"
+        data-default-model="openrouter/free"
         data-index="/site-index.json"></script>
 ```
 

@@ -78,7 +78,16 @@ await ok("page text cap is enforced", () => {
 });
 
 console.log("\nMODELS picker includes free models");
-await ok("default auto present + at least one free model", () => {
+await ok("default is 'Auto (free models only)' = openrouter/free (same value as the picker option)", () => {
+  assert.equal(W.DEFAULT_MODEL, "openrouter/free");
+  assert.equal(W.MODELS.find((m) => m.id === W.DEFAULT_MODEL).label, "Auto (free models only)");
+});
+await ok("pickModel: no saved choice -> free default", () => assert.equal(W.pickModel(null, false), "openrouter/free"));
+await ok("pickModel: saved old default 'openrouter/auto' is migrated once to free", () => assert.equal(W.pickModel("openrouter/auto", false), "openrouter/free"));
+await ok("pickModel: after migration an explicit 'openrouter/auto' pick wins", () => assert.equal(W.pickModel("openrouter/auto", true), "openrouter/auto"));
+await ok("pickModel: another saved choice wins", () => assert.equal(W.pickModel("google/gemma-4-31b-it:free", false), "google/gemma-4-31b-it:free"));
+await ok("pickModel: unknown saved id falls back to default", () => assert.equal(W.pickModel("evil/model", false), "openrouter/free"));
+await ok("'Auto (best available)' still selectable + at least one free model", () => {
   assert.ok(W.MODELS.some((m) => m.id === "openrouter/auto"));
   assert.ok(W.MODELS.some((m) => /:free$|\/free$/.test(m.id)));
 });

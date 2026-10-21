@@ -37,3 +37,5 @@
 .btw-remember input { margin-top: 2px; width: 16px; height: 16px; flex: 0 0 auto; }
 .btw-debug { margin: 0; max-height: 120px; overflow: auto; padding: 6px 12px; font: 11px/1.45 ui-monospace, Menlo, monospace; color: #7ee787; background: #05080c; border-bottom: 1px solid #1a212b; white-space: pre-wrap; }
 @media (prefers-color-scheme: light) { .btw-remember { background: #f7f9fb; color: #5b6676; } }
+/* Narrow phones: the site name is already in the sheet's aria-label and the composer placeholder; give the model picker the room so "Auto (free models only)" reads in full. */
+@media (max-width: 420px) { .btw-title { display: none; } .btw-head { gap: 6px; padding: 8px 6px 8px 12px; } }

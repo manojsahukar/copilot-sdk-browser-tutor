@@ -76,6 +76,7 @@ await m.close();
 // ---------------- Phase B: mocked OpenRouter connect/chat/disconnect ----------------
 console.log("Phase B — mocked OpenRouter + renderer");
 const p = await b.newPage();
+const chatModels = [];
 const csp = [], errors = [];
 p.on("console", (e) => { const t = e.text(); if (/content security|refused to/i.test(t)) csp.push(t); });
 p.on("pageerror", (e) => errors.push(String(e.message || e)));
@@ -86,7 +87,7 @@ p.on("request", (req) => {
   if (u.startsWith("https://openrouter.ai/")) {
     if (req.method() === "OPTIONS") return req.respond({ status: 204, headers: CORS, body: "" });
     if (u === "https://openrouter.ai/api/v1/auth/keys") return req.respond({ status: 200, contentType: "application/json", headers: CORS, body: JSON.stringify({ key: "sk-or-v1-MOCKKEY0000", user_id: "mock-user" }) });
-    if (u === "https://openrouter.ai/api/v1/chat/completions") return req.respond({ status: 200, contentType: "text/event-stream", headers: CORS, body: SSE });
+    if (u === "https://openrouter.ai/api/v1/chat/completions") { try { chatModels.push(JSON.parse(req.postData() || "{}").model); } catch (e) {} return req.respond({ status: 200, contentType: "text/event-stream", headers: CORS, body: SSE }); }
     return req.respond({ status: 200, headers: CORS, body: "" });
   }
   return req.continue();
@@ -122,12 +123,27 @@ const ac = await p.evaluate(() => ({ key: sessionStorage.getItem("btw_or_key"), 
 must(ac.key === "sk-or-v1-MOCKKEY0000", "exchange stored sk-or key in sessionStorage");
 must(ac.url === "", "code/state scrubbed from the URL");
 must(ac.connected, "widget reports connected");
+const pick = await p.evaluate(() => { const s = document.querySelector(".btw-model"); return { value: s.value, label: s.options[s.selectedIndex].textContent, hasAuto: [...s.options].some((o) => o.value === "openrouter/auto") }; });
+must(pick.value === "openrouter/free" && pick.label === "Auto (free models only)", "picker defaults to 'Auto (free models only)' (openrouter/free)");
+must(pick.hasAuto, "'Auto (best available)' is still selectable");
 
 // chat stream + citation
 await p.evaluate(() => { window.__btwUI.open(); window.__btwUI.setInput("where is my key stored?"); return window.__btwUI.submit(); });
 await p.waitForFunction(() => { const m = document.querySelectorAll(".btw-assistant"); const l = m[m.length - 1]; return l && /sessionStorage/i.test(l.textContent); }, { timeout: 10000 });
 const chat = await p.evaluate(() => { const m = document.querySelectorAll(".btw-assistant"); const l = m[m.length - 1]; return { cite: !!l.querySelector('a[href="/widget/storage.html"]'), bold: !!l.querySelector("strong"), hist: !!sessionStorage.getItem("btw_chat") }; });
 must(chat.cite, "reply cites the source page as a link");
+must(chatModels[chatModels.length - 1] === "openrouter/free", "chat request used model openrouter/free by default (got " + chatModels[chatModels.length - 1] + ")");
+// one-time migration of a stored old default, and an explicit Auto pick afterwards is respected
+await p.evaluate(() => { sessionStorage.setItem("btw_model", "openrouter/auto"); sessionStorage.removeItem("btw_model_mig_free"); });
+await p.reload({ waitUntil: "networkidle0" }); await p.waitForFunction(() => !!window.__btwUI);
+must(await p.evaluate(() => document.querySelector(".btw-model").value === "openrouter/free" && sessionStorage.getItem("btw_model") === "openrouter/free"), "stored old default 'openrouter/auto' migrated once to free");
+await p.select(".btw-model", "openrouter/auto");
+await p.reload({ waitUntil: "networkidle0" }); await p.waitForFunction(() => !!window.__btwUI);
+must(await p.evaluate(() => document.querySelector(".btw-model").value === "openrouter/auto"), "an explicit 'Auto (best available)' pick afterwards wins (not re-migrated)");
+await p.select(".btw-model", "google/gemma-4-31b-it:free");
+await p.reload({ waitUntil: "networkidle0" }); await p.waitForFunction(() => !!window.__btwUI);
+must(await p.evaluate(() => document.querySelector(".btw-model").value === "google/gemma-4-31b-it:free"), "any other saved choice still wins");
+await p.evaluate(() => { sessionStorage.removeItem("btw_model"); });
 must(chat.bold, "Markdown rendered (bold)");
 must(chat.hist, "chat history persisted to sessionStorage (btw_chat)");
 await p.screenshot({ path: "docs/widget-cited.png" });
@@ -138,6 +154,18 @@ const ad = await p.evaluate(() => ["btw_or_key", "btw_or_uid", "btw_chat", "btw_
 must(ad.every((v) => v === null), "disconnect wiped btw_or_key / uid / chat / model");
 const iso = await p.evaluate(() => ({ bt: localStorage.getItem("bt_chat"), only: Object.keys(sessionStorage).every((k) => k.startsWith("btw_")) }));
 must(iso.bt === null && iso.only, "isolated: only btw_* keys, never bt_sess/bt_chat");
+
+// mobile screenshot: fresh tab, connected (test key, no network), picker defaulting to free-only
+const ms = await b.newPage();
+await ms.emulate({ viewport: { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }, userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129 Mobile Safari/537.36" });
+await ms.evaluateOnNewDocument(() => { if (location.pathname.startsWith("/widget")) sessionStorage.setItem("btw_or_key", "sk-or-v1-SCREENSHOT-TEST"); });
+await ms.goto(PAGE, { waitUntil: "networkidle0" }); await ms.waitForFunction(() => !!window.__btwUI);
+await ms.tap(".btw-fab"); await new Promise((r) => setTimeout(r, 400));
+must(await ms.evaluate(() => document.querySelector(".btw-model").value === "openrouter/free"), "fresh mobile tab: picker shows free-only");
+const fit = await ms.evaluate(() => { const s = document.querySelector(".btw-model"), c = document.createElement("canvas").getContext("2d"); c.font = getComputedStyle(s).font; return { need: c.measureText("Auto (free models only)").width, have: s.clientWidth }; });
+must(fit.have >= fit.need + 30, "mobile: full 'Auto (free models only)' label fits the picker (" + Math.round(fit.have) + "px for " + Math.round(fit.need) + "px text)");
+await ms.screenshot({ path: "docs/widget-default-free.png" });
+await ms.close();
 
 // desktop screenshot
 await p.setViewport({ width: 1280, height: 860, deviceScaleFactor: 1 });

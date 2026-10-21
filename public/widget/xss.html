@@ -13,5 +13,5 @@
 <p>The pilot pages ship a strict <strong>meta-tag CSP</strong> (<code>script-src 'self'</code>, no <code>unsafe-inline</code>, no <code>eval</code>), so injected inline scripts will not run. Model replies are rendered through <code>marked</code> + <code>DOMPurify</code>, so a prompt-injected answer containing <code>&lt;script&gt;</code> or <code>&lt;img onerror&gt;</code> is neutralised, never executed. A meta CSP cannot set <code>frame-ancestors</code> or <code>report-uri</code>, so clickjacking protection still needs a real header on hosts that allow it.</p>
 <div class="callout">Keys in client-side storage are convenient and backend-free, but they are only as safe as the page is free of XSS. Treat the key as the visitor's to protect.</div>
 </article></div>
-<script src="/static/widget.js" data-site-name="Tutor Docs" data-context-selector="article" data-default-model="openrouter/auto" data-index="/widget/site-index.json"></script>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json"></script>
 </body></html>

@@ -5,7 +5,7 @@
  *   <script src="/assets/widget.js"
  *           data-site-name="My site"
  *           data-context-selector="article"
- *           data-default-model="openrouter/auto"
+ *           data-default-model="openrouter/free"
  *           data-index="/site-index.json"></script>
  *
  * - OpenRouter OAuth PKCE (S256) done entirely in the browser. The sk-or key
@@ -40,7 +40,9 @@
   var PKCE_TTL = 10 * 60 * 1000;            // matches OpenRouter's 10-minute code expiry
   var REMEMBER_TTL = 7 * 24 * 3600 * 1000;  // opt-in "remember on this device"
 
-  // Curated models for the picker. Default Auto; includes free models.
+  // Default = "Auto (free models only)". "Auto (best available)" stays selectable (may bill paid models).
+  var DEFAULT_MODEL = "openrouter/free", OLD_DEFAULT = "openrouter/auto", K_MIG = "btw_model_mig_free";
+  // Curated models for the picker. Includes free models.
   var MODELS = [
     { id: "openrouter/auto", label: "Auto (best available)", note: "May route to paid models — billed to YOUR OpenRouter credits." },
     { id: "openrouter/free", label: "Auto (free models only)", note: "Free only; shared pool, often rate-limited." },
@@ -153,10 +155,19 @@
     return msgs;
   }
 
+  // Choose the picker value: a saved choice wins, except a saved OLD default ("openrouter/auto") that was never
+  // explicitly re-picked is migrated ONCE to the configured default; unknown ids fall back to the default.
+  function pickModel(saved, migrated, configuredDefault, models) {
+    var def = configuredDefault || DEFAULT_MODEL;
+    var known = function (id) { return (models || MODELS).some(function (m) { return m.id === id; }); };
+    if (saved === OLD_DEFAULT && !migrated) saved = def;
+    return saved && known(saved) ? saved : (known(def) ? def : DEFAULT_MODEL);
+  }
+
   var INTERNALS = {
     b64url: b64url, makeVerifier: makeVerifier, pkceChallenge: pkceChallenge, randState: randState,
     cleanText: cleanText, tokenize: tokenize, bm25Index: bm25Index, bm25Search: bm25Search,
-    buildMessages: buildMessages, MODELS: MODELS
+    buildMessages: buildMessages, MODELS: MODELS, DEFAULT_MODEL: DEFAULT_MODEL, pickModel: pickModel
   };
   // Always expose internals for unit tests (Node: no window -> globalThis).
   G.__btw = INTERNALS;
@@ -210,7 +221,7 @@
   var cfg = {
     siteName: (ME && ME.getAttribute("data-site-name")) || "this site",
     selector: (ME && ME.getAttribute("data-context-selector")) || "article, main, [role=main], body",
-    defaultModel: (ME && ME.getAttribute("data-default-model")) || "openrouter/auto",
+    defaultModel: (ME && ME.getAttribute("data-default-model")) || DEFAULT_MODEL,
     indexUrl: (ME && ME.getAttribute("data-index")) || "",
     assetBase: (function () {
       try { var u = new URL(ME.src); return u.href.slice(0, u.href.lastIndexOf("/") + 1); } catch (e) { return "/static/"; }
@@ -408,7 +419,9 @@
     var conn = h("button", "btw-conn"); conn.type = "button";
     var sel = document.createElement("select"); sel.className = "btw-model"; sel.setAttribute("aria-label", "Model");
     MODELS.forEach(function (m) { var o = document.createElement("option"); o.value = m.id; o.textContent = m.label; sel.appendChild(o); });
-    sel.value = sget(K_MODEL) || cfg.defaultModel;
+    sel.value = pickModel(sget(K_MODEL), sget(K_MIG) === "1", cfg.defaultModel);
+    if (sget(K_MODEL) && sget(K_MODEL) !== sel.value) sset(K_MODEL, sel.value); // persist the one-time migration
+    sset(K_MIG, "1"); // from now on an explicit "Auto (best available)" pick is respected
     var close = h("button", "btw-close", "✕"); close.type = "button"; close.setAttribute("aria-label", "Close");
     head.appendChild(title); head.appendChild(sel); head.appendChild(conn); head.appendChild(close);
 
