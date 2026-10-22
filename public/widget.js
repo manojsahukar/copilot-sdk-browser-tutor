@@ -107,6 +107,14 @@
     return out;
   }
   function validClientId(id) { return typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{7,99}$/.test(id); }
+  // The OAuth redirect URI for this page (pure; tested): origin + path only, never the query or hash, so it matches
+  // the URI registered with the provider byte for byte. Hugging Face requires an EXACT registered match, so for HF a
+  // trailing "/index.html" is normalised to "/" (register directory URLs such as https://site.example/widget/).
+  function redirectFor(origin, pathname, providerId) {
+    var path = String(pathname || "/");
+    if (providerId === "huggingface") path = path.replace(/\/index\.html?$/i, "/");
+    return String(origin) + path;
+  }
   // Build the HF authorize URL (pure; tested).
   function hfAuthUrl(clientId, redirectUri, state, challenge) {
     var u = new URL(HF_AUTH);
@@ -265,7 +273,7 @@
     cleanText: cleanText, tokenize: tokenize, bm25Index: bm25Index, bm25Search: bm25Search,
     buildMessages: buildMessages, MODELS: MODELS, DEFAULT_MODEL: DEFAULT_MODEL, pickModel: pickModel,
     safeHref: safeHref, parseSuggestions: parseSuggestions, parsePageCap: parsePageCap,
-    parseProviders: parseProviders, validClientId: validClientId, hfAuthUrl: hfAuthUrl, redact: redact,
+    parseProviders: parseProviders, validClientId: validClientId, hfAuthUrl: hfAuthUrl, redirectFor: redirectFor, redact: redact,
     HF_MODELS: HF_MODELS, HF_DEFAULT_MODEL: HF_DEFAULT_MODEL, HF_SCOPES: HF_SCOPES
   };
   // Always expose internals for unit tests (Node: no window -> globalThis).
@@ -455,7 +463,7 @@
     var pid = providerId || activeId();
     var verifier = makeVerifier(), state = randState();
     var challenge = await pkceChallenge(verifier);
-    var redirectUri = location.origin + location.pathname;
+    var redirectUri = redirectFor(location.origin, location.pathname, pid);
     // localStorage (not sessionStorage) so the verifier survives the return landing in a NEW tab, a Custom
     // Tab or an installed-app context. Short TTL, one-time: deleted the moment the callback reads it.
     // The visitor's not-yet-sent question rides along (one-time, same 10-minute TTL) so it can be put back in the

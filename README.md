@@ -225,7 +225,7 @@ CSSOM, which `style-src` does not block. Adjust for what the site already uses:
 The tutor's own app origin keeps its stricter header CSP (`script-src 'self'; connect-src 'self'`, `frame-ancestors 'none'`); only the
 static `/widget/` pilot pages allow `connect-src https://openrouter.ai https://huggingface.co https://router.huggingface.co`.
 
-#### Hugging Face sign-in (pilot, off by default)
+#### Hugging Face sign-in (pilot: opt-in per site; ON on this repo's /widget/ pages)
 
 A second provider: "Sign in with Hugging Face" (public OAuth app, **no client secret**, PKCE S256) → the visitor's own
 HF access token (scopes `openid profile inference-api`) → chat via the OpenAI-compatible
@@ -244,6 +244,10 @@ credits; free accounts must buy credits). It only appears when the host opts in 
 - Without both attributes (or with a malformed client id) the widget is byte-for-byte OpenRouter-only: no picker.
 - Register the app with **every exact page URL** the widget runs on as a redirect URI (the widget uses
   `origin + pathname`, e.g. `https://site/docs/` and `https://site/docs/page.html`; HF requires an exact match for https).
+  Never the query or hash; a trailing `/index.html` is sent as the directory URL (`/docs/`), so register that form.
+  This repo's live `/widget/` pages use the public client id `bb10112f-2b6d-415b-a6ca-e71957dd0d8e` with redirect URIs
+  `https://copilot-sdk.demo.curiosta.com/widget/`, `…/widget/storage.html`, `…/widget/xss.html`, `…/widget/openrouter.html`
+  and `…/widget/privacy.html`. OpenRouter stays the default provider (`openrouter/free`).
 - Host CSP: add `https://huggingface.co` (token endpoint) and `https://router.huggingface.co` (chat) to `connect-src`.
   If they're missing, the widget says which origin the CSP blocked.
 - Tokens: sessionStorage (`btw_hf_token`) with the token's `expires_in` (HF default ~8 h); no refresh token is used —

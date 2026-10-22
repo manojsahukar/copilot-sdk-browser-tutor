@@ -151,6 +151,13 @@ await ok("authorize URL: huggingface.co, PKCE S256, exact redirect, inference-ap
   assert.deepEqual(u.searchParams.get("scope").split(" ").sort(), ["inference-api", "openid", "profile"]);
   assert.equal(u.searchParams.get("client_secret"), null);
 });
+await ok("redirect URI: origin + path only (no query/hash); HF maps /index.html to the registered directory URL", () => {
+  assert.equal(W.redirectFor("https://site.example", "/widget/", "huggingface"), "https://site.example/widget/");
+  assert.equal(W.redirectFor("https://site.example", "/widget/xss.html", "huggingface"), "https://site.example/widget/xss.html");
+  assert.equal(W.redirectFor("https://site.example", "/widget/index.html", "huggingface"), "https://site.example/widget/");
+  assert.equal(W.redirectFor("https://site.example", "/widget/index.html", "openrouter"), "https://site.example/widget/index.html");
+  assert.ok(!/[?#]/.test(W.redirectFor("https://site.example", "/widget/", "huggingface")));
+});
 await ok("curated HF models: small set, router ids, cheap default first", () => {
   assert.ok(W.HF_MODELS.length >= 3 && W.HF_MODELS.length <= 6);
   assert.equal(W.HF_MODELS[0].id, W.HF_DEFAULT_MODEL);

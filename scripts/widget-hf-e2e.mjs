@@ -20,7 +20,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 let fail = 0; const must = (c, m) => { if (!c) { fail++; console.log("  FAIL -", m); } else console.log("  ok -", m); };
 
-const realPage = await fetch(PAGE); const realHtml = await realPage.text(); const realCsp = realPage.headers.get("content-security-policy");
+const realPage = await fetch(PAGE); const shippedHtml = await realPage.text(); const realCsp = realPage.headers.get("content-security-policy");
+// The live pilot pages now ship the HF opt-in with the real (public) client id. Strip it so "off" is still testable and
+// the rest of the run uses the PLACEHOLDER client id (no request ever reaches the real HF app).
+const OPTIN_RE = / data-providers="[^"]*" data-hf-client-id="[^"]*"/;
+const shippedOptIn = OPTIN_RE.test(shippedHtml);
+const realHtml = shippedHtml.replace(OPTIN_RE, "");
 const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", headless: "new", args: ["--no-sandbox"] });
 let ctx = await b.createBrowserContext();
 const seen = { token: [], chat: [], or: [], unexpected: [] };
@@ -78,7 +83,10 @@ const start = (p) => p.evaluate(async () => { const url = await window.__btwUI.p
 async function ret(qs) { const B = await newTab("/widget/" + qs); await B.evaluate(() => window.__btwUI.exchangeDone()); await sleep(300); return B; }
 async function send(p, text) { await p.evaluate((t) => { window.__btwUI.open(); window.__btwUI.setInput(t); return window.__btwUI.submit(); }, text); await sleep(400); }
 
-console.log("1) OFF by default: the unmodified page offers OpenRouter only");
+console.log("0) shipped page: HF opt-in present (providers + client id), OpenRouter default unchanged");
+must(shippedOptIn && /data-default-model="openrouter\/free"/.test(shippedHtml), "the served /widget/ page carries data-providers + data-hf-client-id and keeps data-default-model=openrouter/free");
+must(/connect-src[^;]* https:\/\/huggingface\.co https:\/\/router\.huggingface\.co/.test(realCsp || ""), "the /widget/ CSP header allows huggingface.co + router.huggingface.co");
+console.log("1) OFF by default: the page without the opt-in offers OpenRouter only");
 let P0 = await newTab("/widget/", { enable: false }); let s = await ui(P0);
 must(s.providers.join() === "openrouter" && !s.picker && s.conn === "Connect OpenRouter", "no data-* opt-in -> no picker, 'Connect OpenRouter', providers=[openrouter]");
 must(s.model === "openrouter/free" && s.models.includes("openrouter/auto"), "OpenRouter models + free default unchanged");
