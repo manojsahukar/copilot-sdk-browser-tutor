@@ -159,7 +159,7 @@ function tools(ctx) {
     },
     {
       name: "suggest_followups",
-      description: "Call this ONCE at the very end of your reply to offer 2-4 short follow-up questions the user might tap next. Each must be a plain-text question under 80 characters, no URLs, no Markdown. These are shown as tappable chips, NOT printed in your answer. Prefer questions that lead to a demo the user has not run yet (e.g. storage_inspector, camera) or the next gotcha.",
+      description: "Call this ONCE at the very end of your reply to offer 2-4 short follow-up questions the user might tap next. Each must be a plain-text question under 80 characters, no URLs, no Markdown. These are shown as tappable chips, NOT printed in your answer. Prefer questions that lead to a demo the user has not run yet (e.g. storage_inspector, camera) or the next gotcha. After render_widget/update_widget, suggest short EDITS to that widget instead (e.g. 'Switch to bar by model', 'Add a 1s threshold line', 'Change to last 7 days', 'Compare with 429s').",
       parameters: { type: "object", properties: { suggestions: { type: "array", items: { type: "string" }, description: "2-4 short plain-text follow-up questions." } }, required: ["suggestions"] },
       handler: async ({ suggestions } = {}) => {
         ctx.followups = validateFollowups(suggestions);

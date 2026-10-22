@@ -203,6 +203,10 @@ summary .status{margin-left:6px}
 .chip-wrap{flex:0 0 auto;display:inline-flex;align-items:stretch;border:1px solid #30363d;border-radius:999px;background:#161b22;overflow:hidden}
 .chip{background:none;border:0;color:#c9d1d9;font:inherit;font-size:.85rem;padding:8px 12px;min-height:40px;cursor:pointer;white-space:nowrap;max-width:70vw;overflow:hidden;text-overflow:ellipsis}
 .chip:hover{background:#1f6feb22}
+.chip-widget{border-color:#1f6feb88;background:#0d1d33}
+.chip-widget .chip{display:inline-flex;align-items:center;gap:6px}
+.chip-badge{font-size:.8rem;line-height:1;flex:0 0 auto}
+.chip-text{overflow:hidden;text-overflow:ellipsis}
 .chip-edit{background:none;border:0;border-left:1px solid #30363d;color:#8b949e;cursor:pointer;padding:0 10px;min-height:40px}
 .chip-edit:hover{color:#c9d1d9;background:#1f6feb22}
 .chip:focus-visible,.chip-edit:focus-visible,.eng-opt:focus-visible{outline:2px solid #58a6ff;outline-offset:1px}

@@ -50,7 +50,12 @@
     const right = series.some((x) => x.axis === "right");
     const ax = spec.axes || {};
     const unitL = (series.find((x) => x.axis !== "right") || {}).unit, unitR = (series.find((x) => x.axis === "right") || {}).unit;
-    const yAxis = [{ type: "value", name: ax.y_label || fmtUnit(unitL) || "", min: ax.y_min, max: ax.y_max, nameTextStyle: { color: "#8b949e" }, splitLine: { lineStyle: { color: "#21262d" } }, axisLabel: { color: "#8b949e" }, scale: ax.y_min == null }];
+    // Percent axes never exceed 100; with an SLO, keep the SLO line in view near the data (sparse data must not blow the scale up).
+    const leftVals = series.filter((x) => x.axis !== "right").flatMap((x) => (x.points || []).map((p) => p[1])).filter((v) => typeof v === "number");
+    let yMin = ax.y_min, yMax = ax.y_max;
+    if (unitL === "%" && yMax == null && leftVals.every((v) => v <= 100)) yMax = 100;
+    if (unitL === "%" && spec.slo != null && yMin == null) yMin = Math.max(0, Math.floor(Math.min(spec.slo, ...leftVals) - 1));
+    const yAxis = [{ type: "value", name: ax.y_label || fmtUnit(unitL) || "", min: yMin, max: yMax, nameTextStyle: { color: "#8b949e" }, splitLine: { lineStyle: { color: "#21262d" } }, axisLabel: { color: "#8b949e" }, scale: yMin == null }];
     if (right) yAxis.push({ type: "value", name: ax.right_label || fmtUnit(unitR) || "", nameTextStyle: { color: "#8b949e" }, splitLine: { show: false }, axisLabel: { color: "#8b949e" }, scale: true });
     const kind = spec.type === "bar" || spec.type === "stacked" ? "bar" : "line";
     const out = series.map((x, i) => ({
@@ -68,7 +73,7 @@
     });
     return { ...base, grid: { left: 44, right: right ? 44 : 14, top: 28, bottom: series.length > 1 ? 44 : 24, containLabel: false },
       tooltip: { trigger: "axis", renderMode: "richText" }, legend: series.length > 1 ? { bottom: 0, type: "scroll", textStyle: { color: "#c9d1d9" } } : undefined,
-      xAxis: { type: "time", axisLabel: { color: "#8b949e", hideOverlap: true }, axisLine: { lineStyle: { color: "#30363d" } } }, yAxis, series: out };
+      xAxis: { type: "time", min: data.from, max: data.to, axisLabel: { color: "#8b949e", hideOverlap: true }, axisLine: { lineStyle: { color: "#30363d" } } }, yAxis, series: out };
   }
 
   // ---------- DOM helpers (textContent only) ----------

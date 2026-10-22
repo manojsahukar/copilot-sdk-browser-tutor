@@ -267,6 +267,7 @@ node scripts/widget-oauth-e2e.mjs       # OAuth return in a NEW tab completes; s
 node scripts/widget-openrouter-live.mjs  # widget against the REAL OpenRouter (no key): auth/keys dummy -> readable 400, chat bogus key -> readable 401, CORS/CSP ok (errors surface, not silent)
 node scripts/widgets-unit.mjs      # widget spec schema (unknown keys, script/URL text, oversize, __proto__), point caps, catalogue, log-template scoping/masking, health maths, per-user isolation
 node scripts/widgets-e2e.mjs       # Health + Metrics boards mobile/desktop: zero CSP violations, lazy chart load, update-in-place + undo, persistence (--agent: REAL agent render→edit screenshots)
+node scripts/chips-e2e.mjs         # suggestion chips: 📊 widget chips mixed with privacy/XSS, one scrollable row on mobile, tapped chip sends its text, post-widget edit chips, hostile chip text stays text, zero CSP violations
 node scripts/e2e-mobile.mjs        # responsive checks at 360/390/768/1280 (needs: npm i --no-save puppeteer-core@23)
 ```
 

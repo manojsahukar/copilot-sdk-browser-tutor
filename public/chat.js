@@ -183,25 +183,41 @@ const DEMO_CHIP = {
   cookie_jar: "Show me cross-site cookies",
   cross_site_fetch: "What is a cross-site request?",
 };
-const STARTERS = ["What does my browser reveal?", "How unique am I?", "What are Agent SDK gotchas?"];
-const OBS_CHIPS = ["Is the site up?", "Plot my reply latency over time", "Show errors last 24h", "Lambda p95 duration last 24h", "When was the last outage?"];
+const STARTERS = ["What does my browser reveal?", "How does XSS get blocked here?", "How unique am I?", "What are Agent SDK gotchas?"];
+// Widget chips: these make the agent draw or edit a live chart in the chat. Shown with a 📊 badge (CSS span, text only).
+const OBS_CHIPS = ["Is the site up?", "Plot my reply latency over time", "Show errors last 24h", "Availability last week?", "Why was it slow?"];
+const WIDGET_EDIT_CHIPS = ["Switch to bar by model", "Add a 1s threshold line", "Change to last 7 days", "Compare with 429s"];
+const WIDGET_RE = /\b(plot|chart|graph|widget|dashboard|bar|line|pie|stacked|threshold|uptime|availability|latency|p9[59]|errors?|429s?|throttl\w*|outage|is the site up|slow|last \d+\s*(h|d|hours?|days?)|last (week|month|24h)|over time|by (model|engine|distribution|endpoint))\b/i;
+const isWidgetChip = (t) => OBS_CHIPS.includes(t) || WIDGET_EDIT_CHIPS.includes(t) || WIDGET_RE.test(t);
+const cleanChip = (t) => String(t).replace(/^[\s📊📈📉]+/u, "").slice(0, 80);
 function demosRun() { try { return Object.keys(JSON.parse(sessionStorage.getItem("bt_demo") || "{}")); } catch { return []; } }
 function curatedChips() {
   const run = new Set(demosRun());
   const notRun = Object.keys(DEMO_CHIP).filter((d) => !run.has(d)).map((d) => DEMO_CHIP[d]);
   const out = [];
-  const obs = OBS_CHIPS.slice((chatHistory.length / 2) % OBS_CHIPS.length).concat(OBS_CHIPS).slice(0, 3); // rotate
-  for (const c of [...obs, ...notRun.slice(0, 2), ...STARTERS]) if (!out.includes(c)) out.push(c);
-  return out.slice(0, 6);
+  const k = (chatHistory.length / 2) % OBS_CHIPS.length;
+  const obs = OBS_CHIPS.slice(k).concat(OBS_CHIPS.slice(0, k));                    // rotate, keep all 5 widget chips reachable
+  // Mix: widget chips first (the showcase), interleaved with privacy / XSS / demo chips; one scrollable row on mobile.
+  const other = [STARTERS[0], STARTERS[1], ...notRun.slice(0, 1), STARTERS[2]];
+  const mix = [obs[0], obs[1], other[0], obs[2], other[1], obs[3], other[2], obs[4], other[3]];
+  for (const c of mix) if (c && !out.includes(c)) out.push(c);
+  return out.slice(0, 8);
 }
 function renderChips(items) {
   chipRow.innerHTML = "";
   (items || []).forEach((textRaw) => {
-    const text = String(textRaw).slice(0, 80);
+    const text = cleanChip(textRaw);
+    if (!text) return;
     const wrap = document.createElement("div"); wrap.className = "chip-wrap"; wrap.setAttribute("role", "listitem");
     const b = document.createElement("button"); b.type = "button"; b.className = "chip";
-    b.textContent = text;                                   // textContent only — never innerHTML
-    b.setAttribute("aria-label", "Ask: " + text);
+    const w = isWidgetChip(text);
+    if (w) {                                                 // CSS badge as a separate span; the text sent stays clean
+      wrap.classList.add("chip-widget");
+      const badge = document.createElement("span"); badge.className = "chip-badge"; badge.setAttribute("aria-hidden", "true"); badge.textContent = "📊";
+      const label = document.createElement("span"); label.className = "chip-text"; label.textContent = text;   // textContent only — never innerHTML
+      b.append(badge, label);
+    } else b.textContent = text;                            // textContent only — never innerHTML
+    b.setAttribute("aria-label", (w ? "Chart: " : "Ask: ") + text);
     b.onclick = () => send(text);
     const edit = document.createElement("button"); edit.type = "button"; edit.className = "chip-edit";
     edit.setAttribute("aria-label", "Edit: " + text); edit.textContent = "✎";
@@ -299,7 +315,12 @@ async function send(message) {
     }
     if (!text.trim()) content.innerHTML = "<span class='muted'>(No answer returned. Try again or switch model.)</span>";
     chatHistory.push({ role: "user", text: message }, { role: "assistant", text, ...(wids.length ? { w: wids } : {}) });
-    lastChips = (followups && followups.length) ? followups.slice(0, 4) : curatedChips();
+    const fu = (followups || []).map(cleanChip).filter(Boolean);
+    if (wids.length) {                                       // a widget just rendered: offer edits to it first
+      const mine = fu.filter(isWidgetChip).slice(0, 1);      // one context-specific edit from the model, if any
+      const rest = fu.filter((c) => !isWidgetChip(c)).slice(0, 1);
+      lastChips = [...new Set([...mine, ...WIDGET_EDIT_CHIPS, ...rest])].slice(0, 6);
+    } else lastChips = fu.length ? fu.slice(0, 4) : curatedChips();
     saveHistory();
     refreshChips();
   } catch (err) {
