@@ -701,7 +701,7 @@
     if (prevM) window.marked = prevM;
     LIB.DOMPurify = purifyOk(window.DOMPurify) ? window.DOMPurify : null;
     if (!LIB.DOMPurify) {
-      var prevP = window.DOMPurify; if (prevP) window.DOMPurify = undefined; await loadAsset("script", { src: cfg.assetBase + "vendor/purify.min.js" });
+      var prevP = window.DOMPurify; if (prevP) window.DOMPurify = undefined; await loadAsset("script", { src: cfg.assetBase + "vendor/purify.min.js?v=3.4.17" }); // ?v busts year-old immutable caches of an older copy
       LIB.DOMPurify = purifyOk(window.DOMPurify) ? window.DOMPurify : null; if (prevP) window.DOMPurify = prevP;
       if (!LIB.DOMPurify) dbg("DOMPurify >= 3.2.4 unavailable: replies render as escaped plain text");
     }
