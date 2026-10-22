@@ -132,13 +132,15 @@ console.log("3) recommended host CSP with Giscus (real giscus.app client)");
     let orOk = false; try { await fetch("https://openrouter.ai/api/v1/models", { method: "GET" }); orOk = true; } catch (e) { orOk = String(e); }
     const css = [...document.styleSheets].some((ss) => (ss.href || "").startsWith("https://giscus.app/"));
     return { csp: window.__csp.slice(), iframe: (document.querySelector("iframe.giscus-frame") || {}).src || "", css, orOk,
-      fab: document.querySelector(".btw-fab").textContent, chips: [...document.querySelectorAll(".btw-chip")].map((c) => c.textContent) };
+      fab: document.querySelector(".btw-fab").textContent, fabAria: document.querySelector(".btw-fab").getAttribute("aria-label"),
+      fabHidden: [...document.querySelectorAll(".btw-fab [aria-hidden=true]")].map((e) => e.textContent).join(""), chips: [...document.querySelectorAll(".btw-chip")].map((c) => c.textContent) };
   });
   must(/^https:\/\/giscus\.app\//.test(s.iframe), "giscus iframe created from https://giscus.app");
   must(s.css, "giscus stylesheet (https://giscus.app/default.css) applied");
   must(s.orOk === true, "connect to https://openrouter.ai allowed by the CSP (" + s.orOk + ")");
   must(s.csp.length === 0, "zero CSP violations on the host page (" + JSON.stringify(s.csp) + ")");
   must(s.fab === "💬 Ask Fixture", "data-fab-label applied");
+  must(s.fabAria === null && s.fabHidden === "💬", "FAB name = its visible text (WCAG 2.5.3 label in name): no generic aria-label, leading emoji aria-hidden");
   must(s.chips.join("|") === "Chip one?|Chip two?", "data-suggestions chips rendered");
   must(errors.length === 0, "no page errors (" + errors.join("; ") + ")");
   await ctx.close();

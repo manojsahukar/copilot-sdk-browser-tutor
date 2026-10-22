@@ -643,7 +643,12 @@
     render = makeRenderer();
 
     var root = h("div", "btw-root"); root.id = "btw-root";
-    var fab = h("button", "btw-fab"); fab.type = "button"; fab.setAttribute("aria-label", "Open chat"); fab.textContent = cfg.fabLabel;
+    // WCAG 2.5.3 Label in Name: the button's accessible name must contain its visible text, so no generic
+    // aria-label ("Open chat" failed axe label-content-name-mismatch). A leading emoji/symbol is decorative.
+    var fab = h("button", "btw-fab"); fab.type = "button";
+    var fm = /^([^\p{L}\p{N}]+?)\s*([\p{L}\p{N}].*)$/u.exec(cfg.fabLabel);
+    if (fm) { var ico = h("span", "btw-fab-ico", fm[1].trim()); ico.setAttribute("aria-hidden", "true"); fab.appendChild(ico); fab.appendChild(document.createTextNode(" " + fm[2])); }
+    else fab.textContent = cfg.fabLabel;
     var backdrop = h("div", "btw-backdrop"); backdrop.hidden = true;
 
     var sheet = h("div", "btw-sheet"); sheet.setAttribute("role", "dialog"); sheet.setAttribute("aria-modal", "true");
