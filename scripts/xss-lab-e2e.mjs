@@ -26,6 +26,8 @@ must(!!labFrame, "lab iframe is present and loaded (framed by main → allowed)"
 
 async function clickRun(demo, variant) { await labFrame.evaluate((d, v) => { const b = document.querySelector(`[data-run="${d}"][data-variant="${v}"]`); if (b) b.click(); }, demo, variant); await sleep(250); }
 const noteText = (id) => labFrame.evaluate((i) => (document.getElementById(i) || {}).textContent || "", id);
+// poll a note from Node (waitForFunction can stall under the lab frame's CSP)
+async function waitNote(id, re, ms = 5000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (re.test(await noteText(id))) return; await sleep(100); } }
 
 await clickRun("reflected", "vuln");  must(/executed/i.test(await noteText("n-reflected-v")), "reflected XSS EXECUTES in the vulnerable variant");
 await clickRun("reflected", "fixed"); must(/safe/i.test(await noteText("n-reflected-f")), "reflected payload is INERT in the fixed variant (textContent)");
@@ -60,11 +62,11 @@ must(/safe/i.test(await noteText("n-links-f")), "links (strict): note says safe"
 must(!(await labFrame.evaluate(() => document.querySelector("#s-links-v a, #s-links-f a"))), "links: destinations shown as text, no live anchors");
 
 // ---- lesson 8: shared sanitiser hooks ----
-await clickRun("hooks", "vuln");
+await clickRun("hooks", "vuln"); await waitNote("n-hooks-v", /⚠|No script/);
 must(/executed|leaked/i.test(await noteText("n-hooks-v")) && /⚠/.test(await noteText("n-hooks-v")), "hooks (shared global): A's permissive hook leaks into B's sanitize and onerror FIRES");
 must(await labFrame.evaluate(() => !!document.querySelector("#s-hooks-v img[onerror]")), "hooks (shared): <img onerror> survived B's sanitize");
 must(await labFrame.evaluate(() => DOMPurify.sanitize('<img src=x onerror="1">').indexOf("onerror") === -1), "hooks: global DOMPurify is clean again after the demo (hooks removed)");
-await clickRun("hooks", "fixed");
+await clickRun("hooks", "fixed"); await waitNote("n-hooks-f", /Safe|Unexpected/);
 must(/safe/i.test(await noteText("n-hooks-f")), "hooks (private instance): B's sanitize strips onerror; nothing runs");
 must(await labFrame.evaluate(() => !document.querySelector("#s-hooks-f img[onerror]") && /kept bold/.test(document.getElementById("s-hooks-f").textContent)), "hooks (private): onerror stripped, harmless <b> kept");
 
@@ -102,8 +104,9 @@ await t2.close();
 await clickRun("keystore", "clear");
 
 // ---- presets on the MAIN page drive the lessons via origin-checked postMessage ----
+await labFrame.evaluate(() => { document.getElementById("n-hooks-f").textContent = ""; });
 for (const [dm, v] of [["links", "vuln"], ["hooks", "fixed"], ["keystore", "inject"]]) {
-  await p.evaluate((d, vv) => document.querySelector(`.lab-preset[data-lab-demo="${d}"][data-lab-variant="${vv}"]`).click(), dm, v); await sleep(400);
+  await p.evaluate((d, vv) => document.querySelector(`.lab-preset[data-lab-demo="${d}"][data-lab-variant="${vv}"]`).click(), dm, v); await sleep(dm === "hooks" ? 1500 : 400);
 }
 must(/safe/i.test(await noteText("n-hooks-f")) && /read sessionStorage key/.test(await labFrame.evaluate(() => document.getElementById("s-keystore").textContent)), "main-page presets launch the new lessons (postMessage)");
 await clickRun("keystore", "clear");

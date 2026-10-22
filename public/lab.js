@@ -193,6 +193,7 @@
 
   // ---- lesson 8: shared sanitiser hooks leaking between two scripts ----
   var HOOK_HOSTILE = '<img src=x onerror="window.__labFired(\'hooks\')"> <b>kept bold</b>';
+  function whenFired(tag, maxMs, cb) { var t0 = Date.now(); (function poll() { if (fired[tag] || Date.now() - t0 >= maxMs) return cb(!!fired[tag]); setTimeout(poll, 50); })(); }
   function galleryHook(node, data) { if (data.attrName === "onerror") data.forceKeepAttr = true; }
   function runHooks(variant) {
     fired.hooks = false;
@@ -207,14 +208,16 @@
       } finally {
         DOMPurify.removeAllHooks();   // clean up so the rest of the lab is unaffected (A forgetting this IS the bug)
       }
-      setTimeout(function () { note(noteId, fired.hooks ? "⚠ Script B's output executed — Script A's permissive hook leaked into the shared DOMPurify, keeping <img onerror>." : "No script ran.", fired.hooks ? "bad" : "ok"); report({ demo: "hooks", variant: "vuln", executed: !!fired.hooks, blocked: false, defence: null }); }, 60);
+      // onerror fires only after the broken image load fails (a network round-trip on a CDN), so poll rather than guess a delay.
+      whenFired("hooks", 2000, function (ran) { note(noteId, ran ? "⚠ Script B's output executed — Script A's permissive hook leaked into the shared DOMPurify, keeping <img onerror>." : "No script ran.", ran ? "bad" : "ok"); report({ demo: "hooks", variant: "vuln", executed: ran, blocked: false, defence: null }); });
     } else {
       // Fixed: Script A sanitises on its OWN private instance; Script B's global sanitize is untouched.
       var dpA = DOMPurify(window);
       dpA.addHook("uponSanitizeAttribute", galleryHook);            // the SAME permissive hook, on A's private instance
       dpA.sanitize('<img src="/lab/static/none.png">');             // A does its permissive thing, privately
       document.getElementById(sinkId).innerHTML = DOMPurify.sanitize(HOOK_HOSTILE);  // B on the clean global
-      setTimeout(function () { note(noteId, fired.hooks ? "Unexpected: payload ran." : "Safe: Script A used a private DOMPurify(window) instance, so Script B's global sanitize still stripped onerror (the image stays, inert).", fired.hooks ? "bad" : "ok"); report({ demo: "hooks", variant: "fixed", executed: false, blocked: true, defence: "private DOMPurify instance" }); }, 60);
+      // give a (wrongly) kept onerror the same time to fire before declaring it safe
+      setTimeout(function () { note(noteId, fired.hooks ? "Unexpected: payload ran." : "Safe: Script A used a private DOMPurify(window) instance, so Script B's global sanitize still stripped onerror (the image stays, inert).", fired.hooks ? "bad" : "ok"); report({ demo: "hooks", variant: "fixed", executed: false, blocked: true, defence: "private DOMPurify instance" }); }, 1200);
     }
   }
 
