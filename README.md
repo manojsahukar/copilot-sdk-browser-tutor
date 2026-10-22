@@ -223,7 +223,32 @@ CSSOM, which `style-src` does not block. Adjust for what the site already uses:
   allows (GitHub Pages can't). Put the `<meta>` **first** in `<head>`, before any script or stylesheet.
 
 The tutor's own app origin keeps its stricter header CSP (`script-src 'self'; connect-src 'self'`, `frame-ancestors 'none'`); only the
-static `/widget/` pilot pages allow `connect-src https://openrouter.ai`.
+static `/widget/` pilot pages allow `connect-src https://openrouter.ai https://huggingface.co https://router.huggingface.co`.
+
+#### Hugging Face sign-in (pilot, off by default)
+
+A second provider: "Sign in with Hugging Face" (public OAuth app, **no client secret**, PKCE S256) → the visitor's own
+HF access token (scopes `openid profile inference-api`) → chat via the OpenAI-compatible
+`https://router.huggingface.co/v1/chat/completions`, **billed to the visitor's HF account** (PRO includes monthly
+credits; free accounts must buy credits). It only appears when the host opts in with **both** attributes:
+
+```html
+<!-- data-providers default: "openrouter" only. data-hf-client-id: from huggingface.co/settings/connected-applications.
+     data-hf-default-model / data-hf-models ("id|Label,id|Label") are optional; default: 5 curated :cheapest models. -->
+<script src="/static/widget.js" defer
+        data-providers="openrouter,huggingface"
+        data-hf-client-id="YOUR_PUBLIC_OAUTH_APP_ID"
+        data-hf-default-model="meta-llama/Llama-3.1-8B-Instruct:cheapest"></script>
+```
+
+- Without both attributes (or with a malformed client id) the widget is byte-for-byte OpenRouter-only: no picker.
+- Register the app with **every exact page URL** the widget runs on as a redirect URI (the widget uses
+  `origin + pathname`, e.g. `https://site/docs/` and `https://site/docs/page.html`; HF requires an exact match for https).
+- Host CSP: add `https://huggingface.co` (token endpoint) and `https://router.huggingface.co` (chat) to `connect-src`.
+  If they're missing, the widget says which origin the CSP blocked.
+- Tokens: sessionStorage (`btw_hf_token`) with the token's `expires_in` (HF default ~8 h); no refresh token is used —
+  visitors sign in again on expiry. "Remember" is capped at the token's expiry (≤ 7 days). Disconnect wipes all providers;
+  revoke at huggingface.co/settings/connected-applications. See the `client-side-hf-token` gotcha.
 
 **Rendering security.** Replies go through the vendored `marked` and **DOMPurify ≥ 3.2.4** (vendored 3.4.17). The widget
 sanitises with its **own private DOMPurify instance** (`DOMPurify(window)`) and adds its link hook only around its own
@@ -348,6 +373,7 @@ node scripts/widget-unit.mjs       # client-side widget: PKCE S256, BM25 retriev
 node scripts/widget-e2e.mjs        # widget pilot: real-touch mobile open/close/reopen (backdrop, Android back), no overflow, 44px targets, pre-connect prompt; mocked connect -> chat (cited) -> disconnect
 node scripts/widget-security-e2e.mjs    # widget: //-link block in the real renderer, DOMPurify hook scoping + host-library isolation, recommended Giscus CSP with the REAL giscus.app client (zero violations), CSP-blocked message, data-* options, unsent question kept across OAuth
 node scripts/widget-oauth-e2e.mjs       # OAuth return in a NEW tab completes; state mismatch / missing / expired / denied all shown; /widget + /widget/index.html; debug trace never leaks; remember opt-in; REAL bogus-code error surfaced
+node scripts/widget-hf-e2e.mjs          # HF pilot (mocked HF): off by default, provider picker/switching, PKCE S256 + 10-min one-time verifier, NEW-tab return exchange (no secret), forged/expired/replayed state, chat via router, 402/401 mapping, expiry purge, remember cap, disconnect wipes all, no token/code leakage, CSP hint
 node scripts/widget-openrouter-live.mjs  # widget against the REAL OpenRouter (no key): auth/keys dummy -> readable 400, chat bogus key -> readable 401, CORS/CSP ok (errors surface, not silent)
 node scripts/widgets-unit.mjs      # widget spec schema (unknown keys, script/URL text, oversize, __proto__), point caps, catalogue, log-template scoping/masking, health maths, per-user isolation
 node scripts/widgets-e2e.mjs       # Health + Metrics boards mobile/desktop: zero CSP violations, lazy chart load, update-in-place + undo, persistence (--agent: REAL agent render→edit screenshots)

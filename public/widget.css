@@ -47,3 +47,11 @@
 .btw-chip:focus-visible { outline: 2px solid #1f6feb; outline-offset: 2px; }
 @media (prefers-color-scheme: light) { .btw-chips { background: #fafbfc; border-color: #eceff3; } .btw-chip { background: #fff; color: #1b1f24; border-color: #d0d7de; } }
 @media print { .btw-root { display: none !important; } }
+/* provider picker (pilot: only shown when the host enables more than one provider) */
+.btw-prov { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: #0c1016; border-bottom: 1px solid #1a212b; font: 12px/1.2 system-ui, sans-serif; }
+.btw-prov-l { color: #9aa7b4; margin-right: 2px; }
+.btw-prov-b { border: 1px solid #30363d; background: #161b22; color: #e6edf3; border-radius: 999px; padding: 6px 12px; min-height: 32px; font: 500 12.5px/1.2 system-ui, sans-serif; cursor: pointer; touch-action: manipulation; }
+.btw-prov-b.on { border-color: #1f6feb; background: #1f3a66; color: #fff; }
+.btw-prov-b.linked::after { content: " ✓"; color: #7ee787; }
+.btw-prov-b:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+@media (prefers-color-scheme: light) { .btw-prov { background: #f7f9fb; border-color: #eceff3; } .btw-prov-l { color: #5b6676; } .btw-prov-b { background: #fff; color: #1b1f24; border-color: #d0d7de; } .btw-prov-b.on { background: #dbeafe; color: #0b3d91; border-color: #1f6feb; } }

@@ -129,4 +129,33 @@ await ok("pageCap limits the page text sent", () => {
   assert.ok((body.match(/z/g) || []).length <= 1000);
 });
 
+console.log("Hugging Face provider (pilot) — off by default");
+await ok("default providers = OpenRouter only", () => { assert.deepEqual([...W.parseProviders(null, "")], ["openrouter"]); assert.deepEqual([...W.parseProviders("", "abc12345-def")], ["openrouter"]); });
+await ok("huggingface needs BOTH data-providers AND a valid client id", () => {
+  assert.deepEqual([...W.parseProviders("openrouter,huggingface", "")], ["openrouter"]);
+  assert.deepEqual([...W.parseProviders("openrouter,huggingface", "bad id <x>")], ["openrouter"]);
+  assert.deepEqual([...W.parseProviders("openrouter,huggingface", "0f1e2d3c-aaaa-bbbb-cccc-1234567890ab")], ["openrouter", "huggingface"]);
+  assert.deepEqual([...W.parseProviders("huggingface", "0f1e2d3c-aaaa-bbbb-cccc-1234567890ab")], ["huggingface"]);
+  assert.deepEqual([...W.parseProviders("evil,javascript:", "x")], ["openrouter"]);
+});
+await ok("client id validation rejects junk", () => { for (const bad of ["", "short", "a b c d e f g h", "x".repeat(101), "<script>abc", "../../etc"]) assert.equal(W.validClientId(bad), false); assert.equal(W.validClientId("0f1e2d3c-aaaa-bbbb-cccc-1234567890ab"), true); });
+await ok("authorize URL: huggingface.co, PKCE S256, exact redirect, inference-api scope, state", () => {
+  const u = new URL(W.hfAuthUrl("client-0001", "https://site.example/widget/", "st4te", "ch4llenge"));
+  assert.equal(u.origin + u.pathname, "https://huggingface.co/oauth/authorize");
+  assert.equal(u.searchParams.get("client_id"), "client-0001");
+  assert.equal(u.searchParams.get("redirect_uri"), "https://site.example/widget/");
+  assert.equal(u.searchParams.get("response_type"), "code");
+  assert.equal(u.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(u.searchParams.get("code_challenge"), "ch4llenge");
+  assert.equal(u.searchParams.get("state"), "st4te");
+  assert.deepEqual(u.searchParams.get("scope").split(" ").sort(), ["inference-api", "openid", "profile"]);
+  assert.equal(u.searchParams.get("client_secret"), null);
+});
+await ok("curated HF models: small set, router ids, cheap default first", () => {
+  assert.ok(W.HF_MODELS.length >= 3 && W.HF_MODELS.length <= 6);
+  assert.equal(W.HF_MODELS[0].id, W.HF_DEFAULT_MODEL);
+  for (const m of W.HF_MODELS) assert.match(m.id, /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(:[a-z-]+)?$/);
+});
+await ok("redact masks hf_ and sk-or- credentials", () => { const r = W.redact("bad hf_ABCDEFGHIJKLmnop and sk-or-v1-abcdef123 end"); assert.ok(!/hf_ABC|sk-or-v1-abc/.test(r)); assert.match(r, /\[redacted\].*\[redacted\]/); });
+
 console.log(`\nWIDGET UNIT TESTS PASSED (${pass})`);

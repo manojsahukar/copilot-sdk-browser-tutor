@@ -160,7 +160,7 @@ function metricsRateOk(sid, max = 240) {
 // different CSP than the app's strict "connect-src 'self'": connect to openrouter.ai is allowed.
 // This mirrors the page's own <meta> CSP (on real GitHub Pages only the meta applies — a host that
 // can't set headers; here we also send it as a header, with frame-ancestors, as defence in depth).
-const WIDGET_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const WIDGET_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const turnLog = new Map();
 function rateOk(sid) {
   const now = Date.now(); const arr = (turnLog.get(sid) || []).filter((t) => now - t < 3600e3);

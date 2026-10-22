@@ -16,6 +16,13 @@
  *   data-fab-label     text of the floating button (default "💬 Ask")
  *   data-greeting      first assistant message after connecting (Markdown, rendered through the sanitiser)
  *   data-models        comma-separated model ids to replace the curated picker list
+ *   data-providers     comma-separated providers to offer, default "openrouter". PILOT: "openrouter,huggingface" adds
+ *                      Hugging Face sign-in (OAuth PKCE, public app) — it is OFF unless BOTH this lists huggingface AND
+ *                      data-hf-client-id is set, so existing (pinned) sites are unaffected.
+ *   data-hf-client-id  client id of the site owner's Hugging Face OAuth app (public: no secret; scopes
+ *                      "openid profile inference-api"; every page URL that hosts the widget registered as a redirect URI)
+ *   data-hf-models     comma-separated Hugging Face router model ids (default: a small curated set)
+ *   data-hf-default-model  default HF model (default "meta-llama/Llama-3.1-8B-Instruct:cheapest")
  *
  * - OpenRouter OAuth PKCE (S256) done entirely in the browser. The sk-or key
  *   lives in sessionStorage ONLY (cleared on tab close / Disconnect).
@@ -28,7 +35,8 @@
  * - CSP: the widget needs NO inline script, inline style attribute, eval or third-party script. It works under a
  *   CSP delivered EITHER as an HTTP header OR as a <meta http-equiv> tag (GitHub Pages can only do the meta).
  *   Minimum it needs: script-src 'self'; style-src 'self'; connect-src https://openrouter.ai (+ 'self' for
- *   data-index). It does not detect or require a CSP; it does listen for "securitypolicyviolation" events and,
+ *   data-index). With the Hugging Face provider enabled also: connect-src https://huggingface.co
+ *   https://router.huggingface.co (token endpoint + chat router; sign-in itself is a top-level navigation). It does not detect or require a CSP; it does listen for "securitypolicyviolation" events and,
  *   if the host's CSP blocks openrouter.ai, tells the visitor (and ?btw_debug=1) instead of failing silently.
  *   A meta CSP cannot carry frame-ancestors / report-uri / sandbox: set those as headers where the host allows.
  *   Sizing uses CSSOM (element.style.x = ...), which CSP style-src does not block.
@@ -48,12 +56,21 @@
   var OR_KEYS = "https://openrouter.ai/api/v1/auth/keys";
   var OR_CHAT = "https://openrouter.ai/api/v1/chat/completions";
   var OR_SETTINGS = "https://openrouter.ai/settings/keys";
+  // ----- Hugging Face endpoints (pilot provider; hard-coded, never from user input) -----
+  var HF_AUTH = "https://huggingface.co/oauth/authorize";
+  var HF_TOKEN = "https://huggingface.co/oauth/token";
+  var HF_CHAT = "https://router.huggingface.co/v1/chat/completions";
+  var HF_APPS = "https://huggingface.co/settings/connected-applications";
+  var HF_SCOPES = "openid profile inference-api";
 
   // Own storage keys (never bt_sess / bt_chat).
   var K_KEY = "btw_or_key", K_UID = "btw_or_uid", K_MODEL = "btw_model",
       K_CHAT = "btw_chat", K_PKCE = "btw_pkce", K_PENDQ = "btw_pending_q",
       // localStorage (survives a new tab / Custom Tab / installed-app return):
-      K_REMEMBER = "btw_remember", K_PERSIST = "btw_or_key_persist", K_DEBUG = "btw_debug";
+      K_REMEMBER = "btw_remember", K_PERSIST = "btw_or_key_persist", K_DEBUG = "btw_debug",
+      // Hugging Face pilot (own keys, never the OpenRouter ones):
+      K_HF = "btw_hf_token", K_HF_EXP = "btw_hf_exp", K_HF_MODEL = "btw_hf_model", K_HF_PERSIST = "btw_hf_token_persist",
+      K_PROV = "btw_provider";
   var PKCE_TTL = 10 * 60 * 1000;            // matches OpenRouter's 10-minute code expiry
   var REMEMBER_TTL = 7 * 24 * 3600 * 1000;  // opt-in "remember on this device"
 
@@ -67,6 +84,41 @@
     { id: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B (free)", note: "Free; shared pool." },
     { id: "deepseek/deepseek-chat:free", label: "DeepSeek Chat (free)", note: "Free; shared pool." }
   ];
+  // Hugging Face router models: chat models served by several Inference Providers (checked against
+  // router.huggingface.co/v1/models, Oct 2026). ":cheapest" = route to the lowest-price live provider.
+  // Billed to the VISITOR's HF account (PRO includes monthly credits; free accounts must buy credits).
+  var HF_DEFAULT_MODEL = "meta-llama/Llama-3.1-8B-Instruct:cheapest";
+  var HF_MODELS = [
+    { id: "meta-llama/Llama-3.1-8B-Instruct:cheapest", label: "Llama 3.1 8B (cheapest)", note: "Cheapest live provider; very low cost." },
+    { id: "openai/gpt-oss-20b:cheapest", label: "gpt-oss 20B (cheapest)", note: "Low cost." },
+    { id: "google/gemma-3-27b-it:cheapest", label: "Gemma 3 27B (cheapest)", note: "Low cost." },
+    { id: "openai/gpt-oss-120b:cheapest", label: "gpt-oss 120B (cheapest)", note: "Higher quality; still low cost." },
+    { id: "deepseek-ai/DeepSeek-V3-0324:cheapest", label: "DeepSeek V3 (cheapest)", note: "Higher cost per token." }
+  ];
+  // Mask any credential-looking string before it can reach the UI or the debug trace.
+  function redact(s) { return String(s).replace(/sk-or-[A-Za-z0-9._-]+/g, "[redacted]").replace(/hf_[A-Za-z0-9._-]{6,}/g, "[redacted]"); }
+  // Parse data-providers: known ids only, OpenRouter first, default ["openrouter"]. Hugging Face also needs a client id.
+  function parseProviders(raw, hfClientId) {
+    var want = String(raw || "openrouter").toLowerCase().split(",").map(function (x) { return x.trim(); });
+    var out = [];
+    if (want.indexOf("openrouter") >= 0 || !want.some(function (x) { return x === "huggingface"; })) out.push("openrouter");
+    if (want.indexOf("huggingface") >= 0 && validClientId(hfClientId)) out.push("huggingface");
+    if (!out.length) out.push("openrouter");
+    return out;
+  }
+  function validClientId(id) { return typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{7,99}$/.test(id); }
+  // Build the HF authorize URL (pure; tested).
+  function hfAuthUrl(clientId, redirectUri, state, challenge) {
+    var u = new URL(HF_AUTH);
+    u.searchParams.set("client_id", clientId);
+    u.searchParams.set("redirect_uri", redirectUri);
+    u.searchParams.set("response_type", "code");
+    u.searchParams.set("scope", HF_SCOPES);
+    u.searchParams.set("state", state);
+    u.searchParams.set("code_challenge", challenge);
+    u.searchParams.set("code_challenge_method", "S256");
+    return u.toString();
+  }
 
   // ============================== pure helpers ==============================
   // base64url of a byte array (works in browser and Node).
@@ -212,7 +264,9 @@
     b64url: b64url, makeVerifier: makeVerifier, pkceChallenge: pkceChallenge, randState: randState,
     cleanText: cleanText, tokenize: tokenize, bm25Index: bm25Index, bm25Search: bm25Search,
     buildMessages: buildMessages, MODELS: MODELS, DEFAULT_MODEL: DEFAULT_MODEL, pickModel: pickModel,
-    safeHref: safeHref, parseSuggestions: parseSuggestions, parsePageCap: parsePageCap
+    safeHref: safeHref, parseSuggestions: parseSuggestions, parsePageCap: parsePageCap,
+    parseProviders: parseProviders, validClientId: validClientId, hfAuthUrl: hfAuthUrl, redact: redact,
+    HF_MODELS: HF_MODELS, HF_DEFAULT_MODEL: HF_DEFAULT_MODEL, HF_SCOPES: HF_SCOPES
   };
   // Always expose internals for unit tests (Node: no window -> globalThis).
   G.__btw = INTERNALS;
@@ -235,17 +289,23 @@
 
   // ---- CSP diagnostics: if the HOST page's CSP (header or meta) blocks openrouter.ai, say so instead of a bare
   // "Failed to fetch". Only the blocked URL's origin and the directive are recorded, never request data.
-  var CSP_BLOCKED = "";
+  var CSP_BLOCKED = "", CSP_HOST = "";
   try {
     document.addEventListener("securitypolicyviolation", function (e) {
       var u = String(e.blockedURI || "");
-      if (/^https:\/\/openrouter\.ai(\/|$)/.test(u)) {
-        CSP_BLOCKED = String(e.effectiveDirective || e.violatedDirective || "connect-src");
-        dbg("CSP blocked openrouter.ai (" + CSP_BLOCKED + ")");
+      var m = /^https:\/\/(openrouter\.ai|huggingface\.co|router\.huggingface\.co)(\/|$)/.exec(u);
+      if (m) {
+        CSP_BLOCKED = String(e.effectiveDirective || e.violatedDirective || "connect-src"); CSP_HOST = m[1];
+        dbg("CSP blocked " + CSP_HOST + " (" + CSP_BLOCKED + ")");
       }
     });
   } catch (e) {}
   var CSP_HINT = "This site's Content-Security-Policy blocks https://openrouter.ai — the site owner must add it to connect-src.";
+  function cspHint() {
+    return /huggingface/.test(CSP_HOST)
+      ? "This site's Content-Security-Policy blocks https://" + CSP_HOST + " — the site owner must add https://huggingface.co and https://router.huggingface.co to connect-src."
+      : CSP_HINT;
+  }
 
   // ---- OAuth callback capture: runs immediately on load, BEFORE any UI or asset loading ----
   var CALLBACK = null;
@@ -272,9 +332,17 @@
   })();
   // Restore an opted-in remembered key into this tab (expired ones are purged).
   (function restoreRemembered() {
-    if (sget(K_KEY)) return;
-    var raw = lget(K_PERSIST); if (!raw) return;
-    try { var p = JSON.parse(raw); if (p && p.k && p.exp > Date.now()) { sset(K_KEY, p.k); dbg("restored remembered key (expires " + new Date(p.exp).toISOString().slice(0, 10) + ")"); } else ldel(K_PERSIST); } catch (e) { ldel(K_PERSIST); }
+    [[K_KEY, K_PERSIST, null, "key"], [K_HF, K_HF_PERSIST, K_HF_EXP, "Hugging Face token"]].forEach(function (x) {
+      if (sget(x[0])) return;
+      var raw = lget(x[1]); if (!raw) return;
+      try {
+        var p = JSON.parse(raw);
+        if (p && p.k && p.exp > Date.now()) { sset(x[0], p.k); if (x[2]) sset(x[2], String(p.te || p.exp)); dbg("restored remembered " + x[3] + " (expires " + new Date(p.exp).toISOString().slice(0, 10) + ")"); }
+        else ldel(x[1]);
+      } catch (e) { ldel(x[1]); }
+    });
+    // btw_provider is per-tab: a fresh tab that only has a remembered HF token should start on Hugging Face.
+    if (!sget(K_PROV) && sget(K_HF) && !sget(K_KEY)) sset(K_PROV, "huggingface");
   })();
 
   var cfg = {
@@ -288,6 +356,8 @@
     fabLabel: cleanText((ME && ME.getAttribute("data-fab-label")) || "💬 Ask", 40) || "💬 Ask",
     greeting: (ME && ME.getAttribute("data-greeting")) || "",
     suggestions: parseSuggestions(ME && ME.getAttribute("data-suggestions")),
+    hfClientId: (ME && ME.getAttribute("data-hf-client-id")) || "",
+    hfDefaultModel: (ME && ME.getAttribute("data-hf-default-model")) || HF_DEFAULT_MODEL,
     assetBase: (function () {
       try { var u = new URL(ME.src); return u.href.slice(0, u.href.lastIndexOf("/") + 1); } catch (e) { return "/static/"; }
     })()
@@ -297,6 +367,22 @@
       .map(function (id) { return { id: id, label: id, note: /:free$|\/free$/.test(id) ? "Free; shared pool." : "" }; });
     INTERNALS.MODELS = MODELS;
   }
+  cfg.providers = parseProviders(ME && ME.getAttribute("data-providers"), cfg.hfClientId);
+  if (ME && ME.getAttribute("data-hf-models")) {
+    HF_MODELS = ME.getAttribute("data-hf-models").split(",").map(function (x) { return x.trim(); }).filter(Boolean)
+      .map(function (id) { return { id: id, label: id, note: "" }; });
+  }
+  // Per-provider facts used by the UI, the exchange and chat. Storage keys for OpenRouter are unchanged.
+  var PROV = {
+    openrouter: { id: "openrouter", name: "OpenRouter", keyK: K_KEY, persistK: K_PERSIST, modelK: K_MODEL, chat: OR_CHAT,
+      models: function () { return MODELS; }, def: function () { return cfg.defaultModel; },
+      billing: "billed to YOUR OpenRouter credits", revoke: OR_SETTINGS },
+    huggingface: { id: "huggingface", name: "Hugging Face", keyK: K_HF, persistK: K_HF_PERSIST, modelK: K_HF_MODEL, chat: HF_CHAT,
+      models: function () { return HF_MODELS; }, def: function () { return cfg.hfDefaultModel; },
+      billing: "billed to YOUR Hugging Face account, Inference Providers credits", revoke: HF_APPS }
+  };
+  function activeId() { var a = sget(K_PROV); return cfg.providers.indexOf(a) >= 0 ? a : cfg.providers[0]; }
+  function P() { return PROV[activeId()]; }
 
   // Load vendored marked + DOMPurify and widget.css from the asset dir (same-origin; CSP 'self').
   function loadAsset(tag, attrs) {
@@ -365,16 +451,22 @@
 
   // -------------------------- OAuth PKCE (browser) --------------------------
   // Prepare an /auth redirect: generate verifier+state, stash in sessionStorage, return the URL.
-  async function prepareAuth() {
+  async function prepareAuth(providerId) {
+    var pid = providerId || activeId();
     var verifier = makeVerifier(), state = randState();
     var challenge = await pkceChallenge(verifier);
+    var redirectUri = location.origin + location.pathname;
     // localStorage (not sessionStorage) so the verifier survives the return landing in a NEW tab, a Custom
     // Tab or an installed-app context. Short TTL, one-time: deleted the moment the callback reads it.
     // The visitor's not-yet-sent question rides along (one-time, same 10-minute TTL) so it can be put back in the
     // box even when the return lands in a new tab.
-    lset(K_PKCE, JSON.stringify({ v: verifier, st: state, t: Date.now(), exp: Date.now() + PKCE_TTL, q: (sget(K_PENDQ) || "").slice(0, 2000) }));
+    lset(K_PKCE, JSON.stringify({ p: pid, ru: redirectUri, v: verifier, st: state, t: Date.now(), exp: Date.now() + PKCE_TTL, q: (sget(K_PENDQ) || "").slice(0, 2000) }));
+    if (pid === "huggingface") {
+      dbg("sign-in started (Hugging Face); verifier stored (10 min, one-time); redirecting to huggingface.co");
+      return hfAuthUrl(cfg.hfClientId, redirectUri, state, challenge);
+    }
     var u = new URL(OR_AUTH);
-    u.searchParams.set("callback_url", location.origin + location.pathname);
+    u.searchParams.set("callback_url", redirectUri);
     u.searchParams.set("code_challenge", challenge);
     u.searchParams.set("code_challenge_method", "S256");
     u.searchParams.set("state", state);
@@ -390,6 +482,7 @@
   async function runCallback(cb) {
     var raw = lget(K_PKCE); ldel(K_PKCE); // one-time
     var pk = null; try { pk = raw ? JSON.parse(raw) : null; } catch (e) {}
+    if (pk && pk.p === "huggingface") return runHfCallback(cb, pk);
     if (!cb.code) {
       dbg("authorization: not granted" + (cb.error ? " (" + String(cb.error).slice(0, 40) + ")" : ""));
       return { ok: false, error: "OpenRouter sign-in was cancelled or denied" + (cb.error ? " (" + String(cb.error).slice(0, 60) + ")" : "") + ". Tap Connect OpenRouter to try again." };
@@ -416,40 +509,86 @@
     } catch (e) {
       dbg("exchange: network error");
       if (!CSP_BLOCKED) await new Promise(function (r) { setTimeout(r, 60); });
-      if (CSP_BLOCKED) return { ok: false, error: CSP_HINT };
+      if (CSP_BLOCKED) return { ok: false, error: cspHint() };
       return { ok: false, error: "Couldn't reach OpenRouter to finish connecting (" + String((e && e.message) || e) + "). Check your connection and tap Connect OpenRouter again." };
     }
     dbg("exchange: HTTP " + r.status + (j && j.key ? " (key received)" : ""));
     if (!r.ok || !j || !j.key) {
       var m = (j && j.error && (j.error.message || j.error)) || j.message || "no key returned";
-      return { ok: false, error: "OpenRouter said: \u201c" + String(m).replace(/sk-or-[A-Za-z0-9._-]+/g, "[redacted]").slice(0, 200) + "\u201d (HTTP " + r.status + "). Tap Connect OpenRouter to try again." };
+      return { ok: false, error: "OpenRouter said: \u201c" + redact(m).slice(0, 200) + "\u201d (HTTP " + r.status + "). Tap Connect OpenRouter to try again." };
     }
+    sset(K_PROV, "openrouter");
     storeKey(j.key, j.user_id);
     dbg("key stored in this tab's sessionStorage" + (lget(K_REMEMBER) === "1" ? " + remembered on this device (7 days)" : ""));
-    return { ok: true, q: (pk.q && typeof pk.q === "string") ? pk.q.slice(0, 2000) : "" };
+    return { ok: true, provider: "openrouter", q: (pk.q && typeof pk.q === "string") ? pk.q.slice(0, 2000) : "" };
+  }
+  // Hugging Face return: public OAuth app + PKCE (no client secret). Same guarantees as OpenRouter: one-time,
+  // 10-minute verifier; state must match; nothing is exchanged otherwise; the code/token never reach the trace.
+  async function runHfCallback(cb, pk) {
+    var again = " Tap Connect Hugging Face to try again.";
+    if (!cb.code) { dbg("authorization: not granted" + (cb.error ? " (" + String(cb.error).slice(0, 40) + ")" : "")); return { ok: false, error: "Hugging Face sign-in was cancelled or denied" + (cb.error ? " (" + String(cb.error).slice(0, 60) + ")" : "") + "." + again }; }
+    if (cfg.providers.indexOf("huggingface") < 0) { dbg("Hugging Face provider not enabled on this page: no exchange"); return { ok: false, error: "Hugging Face sign-in isn't enabled on this page." }; }
+    if (!pk.v) { dbg("stored verifier: MISSING"); return { ok: false, error: "This sign-in wasn't started in this browser, so it can't be completed here." + again }; }
+    if (!pk.exp || pk.exp < Date.now()) { dbg("stored verifier: EXPIRED"); return { ok: false, error: "The sign-in took longer than 10 minutes and expired." + again }; }
+    dbg("stored verifier: present (started " + Math.round((Date.now() - (pk.t || Date.now())) / 1000) + "s ago)");
+    if (!cb.state || cb.state !== pk.st) { dbg("state match: NO — rejected, no exchange attempted"); return { ok: false, error: "Security check failed: the sign-in response didn't match the request (state mismatch)." + again }; }
+    dbg("state match: yes; exchanging code at huggingface.co (public client, PKCE)");
+    var r, j;
+    try {
+      r = await fetch(HF_TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type: "authorization_code", code: cb.code, redirect_uri: pk.ru || (location.origin + location.pathname),
+          client_id: cfg.hfClientId, code_verifier: pk.v }).toString() });
+      j = await r.json().catch(function () { return {}; });
+    } catch (e) {
+      dbg("exchange: network error");
+      if (!CSP_BLOCKED) await new Promise(function (res) { setTimeout(res, 60); });
+      if (CSP_BLOCKED) return { ok: false, error: cspHint() };
+      return { ok: false, error: "Couldn't reach Hugging Face to finish connecting (" + redact((e && e.message) || e).slice(0, 120) + ")." + again };
+    }
+    dbg("exchange: HTTP " + r.status + (j && j.access_token ? " (token received)" : ""));
+    if (!r.ok || !j || !j.access_token) {
+      var m = (j && (j.error_description || j.error)) || "no token returned";
+      return { ok: false, error: "Hugging Face said: \u201c" + redact(typeof m === "string" ? m : JSON.stringify(m)).slice(0, 200) + "\u201d (HTTP " + r.status + ")." + again };
+    }
+    var life = Math.max(60, Math.min(Number(j.expires_in) || 28800, 30 * 24 * 3600)) * 1000;   // HF default: 8 h
+    var tokenExp = Date.now() + life;
+    if (!/(^|\s)inference-api(\s|$)/.test(String(j.scope || HF_SCOPES))) dbg("granted scope lacks inference-api");
+    sset(K_PROV, "huggingface");
+    sset(K_HF, j.access_token); sset(K_HF_EXP, String(tokenExp));
+    if (lget(K_REMEMBER) === "1") lset(K_HF_PERSIST, JSON.stringify({ k: j.access_token, exp: Math.min(Date.now() + REMEMBER_TTL, tokenExp), te: tokenExp }));
+    dbg("token stored in this tab's sessionStorage (expires in " + Math.round(life / 3600000) + " h)" + (lget(K_REMEMBER) === "1" ? " + remembered on this device until it expires (max 7 days)" : ""));
+    return { ok: true, provider: "huggingface", q: (pk.q && typeof pk.q === "string") ? pk.q.slice(0, 2000) : "" };
   }
   // Kept for tests/back-compat: throws on failure.
   async function exchangeCode(code, state) { var r = await runCallback({ code: code, state: state }); if (!r.ok) throw new Error(r.error); return true; }
-  function connected() { return !!sget(K_KEY); }
-  function disconnect() { [K_KEY, K_UID, K_CHAT, K_MODEL, K_PENDQ].forEach(sdel); ldel(K_PERSIST); ldel(K_REMEMBER); ldel(K_PKCE); }
+  // Hugging Face tokens expire (default 8 h); an expired one is purged rather than sent.
+  function hfLive() {
+    if (!sget(K_HF)) return false;
+    var exp = Number(sget(K_HF_EXP) || 0);
+    if (exp && exp < Date.now()) { sdel(K_HF); sdel(K_HF_EXP); ldel(K_HF_PERSIST); dbg("Hugging Face token expired: removed"); return false; }
+    return true;
+  }
+  function connectedTo(pid) { return pid === "huggingface" ? (cfg.providers.indexOf("huggingface") >= 0 && hfLive()) : !!sget(K_KEY); }
+  function connected() { return connectedTo(activeId()); }
+  // Disconnect wipes EVERY provider's credential, the chat and the pending sign-in.
+  function disconnect() { [K_KEY, K_UID, K_CHAT, K_MODEL, K_PENDQ, K_HF, K_HF_EXP, K_HF_MODEL].forEach(sdel); [K_PERSIST, K_HF_PERSIST, K_REMEMBER, K_PKCE].forEach(ldel); }
   // Start the code exchange NOW, in parallel with loading the UI assets, so nothing can skip it.
   var EXCHANGE = CALLBACK ? runCallback(CALLBACK) : null;
 
   // ------------------------------ chat (stream) -----------------------------
   async function streamChat(messages, model, onDelta, signal) {
-    var key = sget(K_KEY);
-    if (!key) throw new Error("not connected");
-    var r = await fetch(OR_CHAT, {
-      method: "POST", signal: signal,
-      headers: {
-        "Content-Type": "application/json", "Authorization": "Bearer " + key,
-        "HTTP-Referer": location.origin, "X-Title": cfg.siteName
-      },
-      body: JSON.stringify({ model: model, messages: messages, stream: true })
-    });
+    var pv = P();
+    if (!connectedTo(pv.id)) throw new Error("not connected");
+    var key = sget(pv.keyK);
+    // HF router: only Authorization + Content-Type (the headers its CORS preflight allows); no attribution headers.
+    var headers = pv.id === "huggingface" ? { "Content-Type": "application/json", "Authorization": "Bearer " + key }
+      : { "Content-Type": "application/json", "Authorization": "Bearer " + key, "HTTP-Referer": location.origin, "X-Title": cfg.siteName };
+    var r = await fetch(pv.chat, { method: "POST", signal: signal, headers: headers,
+      body: JSON.stringify({ model: model, messages: messages, stream: true }) });
     if (!r.ok) {
       var e = await r.json().catch(function () { return {}; });
-      throw new Error((e && e.error && e.error.message) || ("OpenRouter HTTP " + r.status));
+      var em = e && e.error && (typeof e.error === "string" ? e.error : e.error.message);
+      throw new Error(redact(em || e.message || "") + " (" + pv.name + " HTTP " + r.status + ")");
     }
     var reader = r.body.getReader(), dec = new TextDecoder(), buf = "", full = "";
     while (true) {
@@ -507,10 +646,30 @@
     var title = h("strong", "btw-title", cfg.siteName);
     var conn = h("button", "btw-conn"); conn.type = "button";
     var sel = document.createElement("select"); sel.className = "btw-model"; sel.setAttribute("aria-label", "Model");
-    MODELS.forEach(function (m) { var o = document.createElement("option"); o.value = m.id; o.textContent = m.label; sel.appendChild(o); });
-    sel.value = pickModel(sget(K_MODEL), sget(K_MIG) === "1", cfg.defaultModel);
-    if (sget(K_MODEL) && sget(K_MODEL) !== sel.value) sset(K_MODEL, sel.value); // persist the one-time migration
-    sset(K_MIG, "1"); // from now on an explicit "Auto (best available)" pick is respected
+    function fillModels() {
+      var pv = P(); sel.textContent = "";
+      pv.models().forEach(function (m) { var o = document.createElement("option"); o.value = m.id; o.textContent = m.label; sel.appendChild(o); });
+      if (pv.id === "openrouter") {
+        sel.value = pickModel(sget(K_MODEL), sget(K_MIG) === "1", cfg.defaultModel);
+        if (sget(K_MODEL) && sget(K_MODEL) !== sel.value) sset(K_MODEL, sel.value); // persist the one-time migration
+        sset(K_MIG, "1"); // from now on an explicit "Auto (best available)" pick is respected
+      } else {
+        sel.value = pickModel(sget(pv.modelK), true, pv.def(), pv.models());
+        if (!sel.value) sel.value = pv.models()[0].id;
+      }
+    }
+    fillModels();
+    // Provider picker (segmented buttons). Only rendered when the host enabled more than one provider.
+    var provRow = null, provBtns = {};
+    if (cfg.providers.length > 1) {
+      provRow = h("div", "btw-prov"); provRow.setAttribute("role", "radiogroup"); provRow.setAttribute("aria-label", "Provider");
+      provRow.appendChild(h("span", "btw-prov-l", "Provider"));
+      cfg.providers.forEach(function (pid) {
+        var b = h("button", "btw-prov-b", PROV[pid].name); b.type = "button"; b.setAttribute("role", "radio"); b.dataset.provider = pid;
+        b.addEventListener("click", function () { switchProvider(pid); });
+        provBtns[pid] = b; provRow.appendChild(b);
+      });
+    }
     var close = h("button", "btw-close", "✕"); close.type = "button"; close.setAttribute("aria-label", "Close");
     head.appendChild(title); head.appendChild(sel); head.appendChild(conn); head.appendChild(close);
 
@@ -528,7 +687,7 @@
     var sendBtn = h("button", "btw-send", "Send"); sendBtn.type = "submit";
     form.appendChild(ta); form.appendChild(sendBtn);
 
-    sheet.appendChild(grip); sheet.appendChild(head); sheet.appendChild(note); sheet.appendChild(remWrap);
+    sheet.appendChild(grip); sheet.appendChild(head); if (provRow) sheet.appendChild(provRow); sheet.appendChild(note); sheet.appendChild(remWrap);
     if (dbgEl) sheet.appendChild(dbgEl);
     var chips = h("div", "btw-chips"); chips.setAttribute("aria-label", "Suggested questions");
     cfg.suggestions.forEach(function (q) {
@@ -581,12 +740,21 @@
     })();
 
     function refresh() {
-      var on = connected();
-      conn.textContent = on ? "Disconnect" : "Connect OpenRouter";
+      var pv = P(), on = connected(), hf = pv.id === "huggingface";
+      conn.textContent = on ? "Disconnect" : "Connect " + pv.name;
       conn.className = "btw-conn" + (on ? " on" : "");
       sel.disabled = !on; ta.disabled = false; sendBtn.disabled = false; // typing allowed pre-connect; Send prompts to connect
       rem.checked = lget(K_REMEMBER) === "1";
-      note.textContent = on
+      remTxt.textContent = hf
+        ? "Remember on this device until the Hugging Face token expires (at most 7 days; stored in localStorage: any script on this site could read it until then — only on your own device)."
+        : "Remember on this device for 7 days (stores the key in localStorage: any script on this site could read it until it expires — only on your own device).";
+      Object.keys(provBtns).forEach(function (pid) { var b = provBtns[pid], a = pid === pv.id; b.className = "btw-prov-b" + (a ? " on" : "") + (connectedTo(pid) ? " linked" : ""); b.setAttribute("aria-checked", a ? "true" : "false"); });
+      if (hf) {
+        var exp = Number(sget(K_HF_EXP) || 0), left = exp ? Math.max(0, Math.round((exp - Date.now()) / 3600000)) : 0;
+        note.textContent = on
+          ? "Connected to Hugging Face. Replies use YOUR token, " + pv.billing + ". Token expires in about " + left + " h" + (lget(K_REMEMBER) === "1" ? "; remembered on this device until then." : " and stays in this tab's sessionStorage only.")
+          : "Sign in with your own Hugging Face account to chat. Inference is billed to your HF account (PRO includes monthly credits; free accounts need credits). The token stays in this tab only (sessionStorage).";
+      } else note.textContent = on
         ? (lget(K_REMEMBER) === "1"
             ? "Connected. Replies use YOUR OpenRouter key (billed to you). Remembered on this device for 7 days (localStorage) — untick to forget it."
             : "Connected. Replies use YOUR OpenRouter key (billed to you). Key stays in this tab's sessionStorage only.")
@@ -595,21 +763,32 @@
       chips.hidden = history.some(function (m) { return m.role === "user"; });
     }
 
+    function switchProvider(pid) {
+      if (cfg.providers.indexOf(pid) < 0 || pid === activeId()) return;
+      sset(K_PROV, pid); fillModels(); refresh(); dbg("provider: " + pid);
+    }
     conn.addEventListener("click", async function () {
+      var pv = P();
       if (connected()) { disconnect(); history = []; log.innerHTML = ""; chips.hidden = false; refresh(); return; }
       conn.disabled = true; conn.textContent = "Redirecting…";
-      try { var url = await prepareAuth(); location.href = url; }
-      catch (e) { conn.disabled = false; refresh(); addMsg("assistant", "Could not start the OpenRouter sign-in."); }
+      try { var url = await prepareAuth(pv.id); location.href = url; }
+      catch (e) { conn.disabled = false; refresh(); addMsg("assistant", "Could not start the " + pv.name + " sign-in."); }
     });
-    sel.addEventListener("change", function () { sset(K_MODEL, sel.value); });
+    sel.addEventListener("change", function () { sset(P().modelK, sel.value); });
     rem.addEventListener("change", function () {
-      if (rem.checked) { lset(K_REMEMBER, "1"); setTimeout(refresh, 0); var k = sget(K_KEY); if (k) lset(K_PERSIST, JSON.stringify({ k: k, exp: Date.now() + REMEMBER_TTL })); dbg("remember on this device: ON"); }
-      else { ldel(K_REMEMBER); ldel(K_PERSIST); setTimeout(refresh, 0); dbg("remember on this device: OFF (persisted key removed)"); }
+      if (rem.checked) {
+        lset(K_REMEMBER, "1"); setTimeout(refresh, 0);
+        var k = sget(K_KEY); if (k) lset(K_PERSIST, JSON.stringify({ k: k, exp: Date.now() + REMEMBER_TTL }));
+        if (hfLive()) { var te = Number(sget(K_HF_EXP) || 0) || (Date.now() + 8 * 3600e3); lset(K_HF_PERSIST, JSON.stringify({ k: sget(K_HF), exp: Math.min(Date.now() + REMEMBER_TTL, te), te: te })); }
+        dbg("remember on this device: ON");
+      } else { ldel(K_REMEMBER); ldel(K_PERSIST); ldel(K_HF_PERSIST); setTimeout(refresh, 0); dbg("remember on this device: OFF (persisted credentials removed)"); }
     });
-    // If the OAuth return finished in ANOTHER tab with "remember" on, pick the key up here too.
+    // If the OAuth return finished in ANOTHER tab with "remember" on, pick the credential up here too.
     window.addEventListener("storage", function (e) {
-      if (e.key === K_PERSIST && e.newValue && !connected()) {
-        try { var p = JSON.parse(e.newValue); if (p && p.k && p.exp > Date.now()) { sset(K_KEY, p.k); refresh(); addMsg("assistant", "✅ Connected (finished in another tab)."); } } catch (x) {}
+      var map = {}; map[K_PERSIST] = ["openrouter", K_KEY, null]; map[K_HF_PERSIST] = ["huggingface", K_HF, K_HF_EXP];
+      var m = map[e.key];
+      if (m && e.newValue && cfg.providers.indexOf(m[0]) >= 0 && !connectedTo(m[0])) {
+        try { var p = JSON.parse(e.newValue); if (p && p.k && p.exp > Date.now()) { sset(m[1], p.k); if (m[2]) sset(m[2], String(p.te || p.exp)); sset(K_PROV, m[0]); fillModels(); refresh(); addMsg("assistant", "✅ Connected to " + PROV[m[0]].name + " (finished in another tab)."); } } catch (x) {}
       }
     });
 
@@ -637,7 +816,7 @@
       var q = ta.value.trim(); if (!q || busy) return;
       if (!connected()) {
         sset(K_PENDQ, q.slice(0, 2000));
-        addMsg("assistant", "**Connect OpenRouter** first (button at the top of this panel) — then I can answer. Your key stays in this tab only and you pay for usage.");
+        addMsg("assistant", "**Connect " + P().name + "** first (button at the top of this panel) — then I can answer. Your " + (P().id === "huggingface" ? "token" : "key") + " stays in this tab only and you pay for usage.");
         conn.classList.add("pulse"); setTimeout(function () { conn.classList.remove("pulse"); }, 2200);
         try { conn.focus(); } catch (e) {}
         return;
@@ -650,7 +829,7 @@
         var page = pageContext();
         var hits = INDEX ? bm25Search(INDEX, q + " " + page.title, 4) : [];
         var msgs = buildMessages({ siteName: cfg.siteName, persona: cfg.persona, page: page, pageCap: cfg.pageCap, retrieved: hits, history: history.slice(0, -1), question: q });
-        var model = sel.value || cfg.defaultModel;
+        var model = sel.value || P().def();
         var full = await streamChat(msgs, model, function (t) { bot.innerHTML = render(t); log.scrollTop = log.scrollHeight; });
         if (!full) { bot.textContent = "(no reply)"; }
         else { bot.innerHTML = render(full); history.push({ role: "assistant", content: full }); saveHistory(); }
@@ -666,7 +845,12 @@
       history.length = 0;
       EXCHANGE.then(function (res) {
         open();
-        if (res.ok) { var pq = res.q || sget(K_PENDQ); sdel(K_PENDQ); if (pq) ta.value = pq; refresh(); addMsg("assistant", "✅ **Connected to OpenRouter.** Ask me anything about **" + cfg.siteName + "** — replies are billed to your OpenRouter credits."); }
+        if (res.ok) {
+          var pq = res.q || sget(K_PENDQ); sdel(K_PENDQ); if (pq) ta.value = pq; fillModels(); refresh();
+          addMsg("assistant", res.provider === "huggingface"
+            ? "✅ **Connected to Hugging Face.** Ask me anything about **" + cfg.siteName + "** — inference is billed to your Hugging Face account."
+            : "✅ **Connected to OpenRouter.** Ask me anything about **" + cfg.siteName + "** — replies are billed to your OpenRouter credits.");
+        }
         else { refresh(); addMsg("assistant", "⚠️ " + res.error); }
       });
     }
@@ -674,15 +858,25 @@
     refresh();
     G.__btwUI = { open: open, close: closeSheet, refresh: refresh, submit: submit, addMsg: addMsg,
       prepareAuth: prepareAuth, exchangeCode: exchangeCode, runCallback: runCallback, connected: connected, disconnect: disconnect,
+      providers: function () { return cfg.providers.slice(); }, provider: activeId, switchProvider: switchProvider, connectedTo: connectedTo,
       exchangeDone: function () { return EXCHANGE ? EXCHANGE.then(function (r) { return r; }) : Promise.resolve(null); },
       ensureIndex: ensureIndex, getIndex: function () { return INDEX; }, render: render,
-      setInput: function (v) { ta.value = v; }, els: { ta: ta, log: log, sel: sel, chips: chips, fab: fab }, cfg: cfg,
+      setInput: function (v) { ta.value = v; }, els: { ta: ta, log: log, sel: sel, chips: chips, fab: fab, prov: provRow, conn: conn, note: note }, cfg: cfg,
       cspBlocked: function () { return CSP_BLOCKED; } };
   }
 
   function friendly(m) {
-    m = String(m);
-    if (CSP_BLOCKED && /failed to fetch|networkerror|load failed/i.test(m)) return CSP_HINT;
+    m = redact(String(m));
+    if (CSP_BLOCKED && /failed to fetch|networkerror|load failed/i.test(m)) return cspHint();
+    if (activeId() === "huggingface") {
+      if (/not connected/i.test(m)) return "Your Hugging Face session expired (tokens last about 8 hours). Tap Connect Hugging Face to sign in again.";
+      if (/401|unauthori[sz]ed|invalid (token|username)/i.test(m)) return "Hugging Face didn't accept the token (it may have expired). Disconnect and sign in again.";
+      if (/402|credit|payment|billing|exceeded your monthly/i.test(m)) return "Your Hugging Face account has no Inference Providers credits left. Add credits (or use PRO's monthly credits) at huggingface.co/settings/billing, or pick a cheaper model.";
+      if (/403|scope|permission/i.test(m)) return "This Hugging Face token can't call Inference Providers (the inference-api permission wasn't granted). Disconnect and sign in again, allowing inference.";
+      if (/429|rate.?limit/i.test(m)) return "Rate-limited by Hugging Face. Wait a moment or pick another model.";
+      if (/404|not supported|model .*not found|no provider/i.test(m)) return "That model isn't available from any provider right now. Pick another model.";
+      return "Something went wrong talking to Hugging Face: " + m;
+    }
     if (/401|invalid api key|no auth/i.test(m)) return "OpenRouter didn't accept the key. Disconnect and reconnect.";
     if (/402|credit|insufficient/i.test(m)) return "Your OpenRouter account is out of credits. Add credits or pick a free model.";
     if (/429|rate.?limit/i.test(m)) return "Rate-limited (free models share a pool). Wait a moment or pick another model.";

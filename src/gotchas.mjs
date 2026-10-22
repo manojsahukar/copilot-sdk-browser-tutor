@@ -237,6 +237,23 @@ export const GOTCHAS = [
     verified: "build",
   },
   {
+    id: "client-side-hf-token",
+    title: "'Sign in with Hugging Face' in a static page hands the browser a spendable inference token",
+    status: "accepted",
+    what: "Hugging Face OAuth works on any website, not only Spaces: a PUBLIC OAuth app (no client secret) plus PKCE S256 lets the page exchange the code at huggingface.co/oauth/token straight from the browser (HF allows CORS there and on router.huggingface.co). With the inference-api scope, the access token can call Inference Providers via router.huggingface.co/v1/chat/completions, billed to the VISITOR's HF account. The widget pilots this as an opt-in second provider (data-providers=\"openrouter,huggingface\" + data-hf-client-id); it is OFF by default.",
+    risk: "Like the OpenRouter key, the HF access token is a bearer credential in sessionStorage: any same-origin script (XSS, a compromised third-party script, an extension) can read it and spend the visitor's HF credits, and with 'profile'/'openid' it identifies them. It is also broader than one site: it is an HF token, so asking for more scopes than inference-api + profile (e.g. write-repos, manage-repos) would turn an XSS into account takeover. There is no client secret to protect, so the redirect URI is the only binding: HF requires an EXACT match for https URIs (only http loopback gets an any-port exception), and a sloppy registration (wildcard-ish paths, an attacker-controllable page on the same origin) lets the code land where it shouldn't. HF's OIDC discovery lists only client_secret_basic/post as token auth methods although public-app PKCE works in practice (huggingface.js does exactly this), and refresh for public auth-code apps is undocumented, so treat the token as ~8 h and re-sign-in rather than storing refresh tokens.",
+    app: "Accepted with tight bounds: only scopes openid profile inference-api; S256 verifier + state in localStorage for 10 minutes, one-time use (new-tab return still works), forged/expired/replayed returns rejected before any exchange; the token lives in sessionStorage (btw_hf_token) with its expires_in tracked and purged when stale; the optional 'remember' copy is capped at the token's own expiry (<= 7 days); Disconnect wipes every provider and links to huggingface.co/settings/connected-applications to revoke; the debug trace and errors redact hf_/sk-or- strings and never print the code or token; replies are rendered through the private DOMPurify + safeHref filter; pages that enable it need connect-src https://huggingface.co https://router.huggingface.co (the widget names them if the CSP blocks a call). Free HF accounts have no included credits, so a 402 is explained rather than shown raw.",
+    fix: "public/widget.js provider abstraction (PROV map, runHfCallback, hfAuthUrl, parseProviders, redact); tutor /widget/ CSP header + meta allow huggingface.co + router.huggingface.co; scripts/widget-hf-e2e.mjs (mocked HF: off by default, switching, PKCE, new-tab return, forged/expired/replayed state, expiry, remember cap, disconnect, no leakage, CSP hint) + widget-unit HF checks. Pilot pages keep HF hidden until a real public OAuth app (client id) is registered.",
+    sources: [
+      { label: "Hugging Face: Sign in with HF (OAuth/OIDC, public apps, PKCE, scopes, redirect rules)", url: "https://huggingface.co/docs/hub/oauth" },
+      { label: "Hugging Face OIDC discovery (endpoints, S256, auth methods)", url: "https://huggingface.co/.well-known/openid-configuration" },
+      { label: "Inference Providers: OpenAI-compatible router + :cheapest/:fastest model suffixes", url: "https://huggingface.co/docs/inference-providers/en/index" },
+      { label: "Inference Providers pricing (billed to the user's account; PRO credits)", url: "https://huggingface.co/docs/inference-providers/pricing" },
+      { label: "huggingface.js oauth-handle-redirect (browser code exchange, no secret)", url: "https://github.com/huggingface/huggingface.js/blob/main/packages/hub/src/lib/oauth-handle-redirect.ts" },
+    ],
+    verified: "build",
+  },
+  {
     id: "llm-driven-visualisation",
     title: "LLM-driven charts: schema-validated specs, not code",
     status: "fixed",
