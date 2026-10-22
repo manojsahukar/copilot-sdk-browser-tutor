@@ -14,9 +14,11 @@
     var d = e.data || {};
     if (d.type === "inject") {
       document.getElementById("s-strict").innerHTML = "Injected: " + String(d.payload || "");
+      // The CSP violation for an inline onerror is raised only when the broken image FAILS (a network round-trip on a CDN),
+      // so wait long enough for it rather than declaring "inert" after a few ms.
       setTimeout(function () {
         if (!blocked) { var n = document.getElementById("n-strict"); n.textContent = "Payload inert (no inline execution allowed)."; n.className = "note ok"; }
-      }, 80);
+      }, 2000);
     }
   });
 })();

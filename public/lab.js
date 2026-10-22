@@ -25,12 +25,19 @@
     promptModel: "Here's a tip for you:\n\n<script>window.__labFired('prompt-script')<\/script>\n\n<img src=x onerror=\"window.__labFired('prompt-img')\">\n\n[totally safe link](javascript:window.__labFired('prompt-link'))\n\n**Bold** advice and a list:\n\n- first\n- second\n\n| col | val |\n|---|---|\n| a | 1 |",
   };
 
+  // onerror payloads fire only after the broken <img> load FAILS, which on a CDN is a network round-trip (often >60 ms).
+  // So never read the verdict after a fixed short delay: poll until it fired (vulnerable) or a safe window passed (fixed).
+  var FIRE_WAIT_MS = 2000, SAFE_WAIT_MS = 1200;
+  function anyFired(tags) { for (var i = 0; i < tags.length; i++) if (fired[tags[i]]) return true; return false; }
+  function whenFired(tags, maxMs, cb) {
+    tags = [].concat(tags); var t0 = Date.now();
+    (function poll() { if (anyFired(tags) || Date.now() - t0 >= maxMs) return cb(anyFired(tags)); setTimeout(poll, 50); })();
+  }
   function afterInject(tag, noteId, demo, variant) {
-    setTimeout(function () {
-      var exec = !!fired[tag];
+    whenFired(tag, FIRE_WAIT_MS, function (exec) {
       note(noteId, exec ? "⚠ Script executed — the injected onerror handler ran in this page." : "No script ran.", exec ? "bad" : "ok");
       report({ demo: demo, variant: variant, executed: exec, blocked: false, defence: null });
-    }, 60);
+    });
   }
 
   // ---- demos ----
@@ -102,7 +109,8 @@
     fired["purify-FAIL"] = false;
     var hostile = '<img src=x onerror="window.__labFired(\'purify-FAIL\')"> <b>kept bold</b> <a href="javascript:alert(1)">link</a>';
     document.getElementById("s-purify").innerHTML = window.DOMPurify ? DOMPurify.sanitize(hostile) : esc(hostile);
-    setTimeout(function () { note("n-purify", fired["purify-FAIL"] ? "Unexpected: payload ran." : "Sanitised: <img>/onerror and javascript: link stripped; <b> kept. Nothing ran.", fired["purify-FAIL"] ? "bad" : "ok"); }, 60);
+    note("n-purify", "Checking…", "");
+    setTimeout(function () { note("n-purify", fired["purify-FAIL"] ? "Unexpected: payload ran." : "Sanitised: <img>/onerror and javascript: link stripped; <b> kept. Nothing ran.", fired["purify-FAIL"] ? "bad" : "ok"); }, SAFE_WAIT_MS);
     // Trusted Types
     note("n-tt", window.trustedTypes ? "Trusted Types IS supported here: assigning a raw string to innerHTML can be forced to throw via a CSP require-trusted-types-for directive." : "Trusted Types is not supported in this browser.", "ok");
     // Strict-CSP sub-frame
@@ -115,15 +123,22 @@
     fired["prompt-img"] = false; fired["prompt-script"] = false; fired["prompt-link"] = false;
     if (variant === "vuln") {
       document.getElementById("s-prompt-v").innerHTML = P.promptModel; // naive — onerror fires (inline <script> won't, per spec)
-      setTimeout(function () { var exec = fired["prompt-img"] || fired["prompt-script"]; note("n-prompt-v", exec ? "⚠ Hostile model output executed (onerror fired) via naive innerHTML." : "No script ran.", exec ? "bad" : "ok"); report({ demo: "prompt", variant: "vuln", executed: !!exec, blocked: false, defence: null }); }, 60);
+      whenFired(["prompt-img", "prompt-script"], FIRE_WAIT_MS, function (exec) { note("n-prompt-v", exec ? "⚠ Hostile model output executed (onerror fired) via naive innerHTML." : "No script ran.", exec ? "bad" : "ok"); report({ demo: "prompt", variant: "vuln", executed: exec, blocked: false, defence: null }); });
     } else {
       var html = window.marked ? marked.parse(P.promptModel) : esc(P.promptModel);
       if (window.DOMPurify) {
-        DOMPurify.addHook && DOMPurify.addHook("afterSanitizeAttributes", function (n) { if (n.tagName === "A") { var h = n.getAttribute("href") || ""; if (!/^https?:\/\//i.test(h)) n.removeAttribute("href"); } });
-        html = DOMPurify.sanitize(html, { FORBID_TAGS: ["img", "script", "style", "iframe"] });
+        // Private instance: the link hook must not leak into (and pile up on) the shared global DOMPurify (see lesson 8).
+        var dp = DOMPurify(window);
+        dp.addHook("afterSanitizeAttributes", function (n) { if (n.tagName === "A") { var h = n.getAttribute("href") || ""; if (!/^https?:\/\//i.test(h)) n.removeAttribute("href"); } });
+        html = dp.sanitize(html, { FORBID_TAGS: ["img", "script", "style", "iframe"] });
       }
       document.getElementById("s-prompt-f").innerHTML = html;
-      setTimeout(function () { note("n-prompt-f", "Neutralised: rendered through the same marked + DOMPurify pipeline the real app uses. No script, no img/onerror, no javascript: links.", "ok"); report({ demo: "prompt", variant: "fixed", executed: false, blocked: true, defence: "marked + DOMPurify" }); }, 60);
+      note("n-prompt-f", "Checking…", "");
+      setTimeout(function () {
+        var exec = anyFired(["prompt-img", "prompt-script", "prompt-link"]);
+        note("n-prompt-f", exec ? "Unexpected: payload ran." : "Neutralised: rendered through the same marked + DOMPurify pipeline the real app uses. No script, no img/onerror, no javascript: links.", exec ? "bad" : "ok");
+        report({ demo: "prompt", variant: "fixed", executed: exec, blocked: !exec, defence: "marked + DOMPurify" });
+      }, SAFE_WAIT_MS);
     }
   }
 
@@ -135,7 +150,7 @@
         if (!res.ok) { note("n-custom", res.j.error || "blocked", "bad"); return; }
         fired.custom = false;
         document.getElementById("s-custom").innerHTML = res.j.payload;   // vulnerable sink
-        setTimeout(function () { note("n-custom", fired.custom ? "⚠ Your payload executed." : "Rendered. (If it had an onerror/img it would run here.)", fired.custom ? "bad" : "ok"); report({ demo: "custom", variant: "vuln", executed: !!fired.custom, blocked: false, defence: null }); }, 60);
+        whenFired("custom", FIRE_WAIT_MS, function (ran) { note("n-custom", ran ? "⚠ Your payload executed." : "Rendered. (If it had an onerror/img it would run here.)", ran ? "bad" : "ok"); report({ demo: "custom", variant: "vuln", executed: ran, blocked: false, defence: null }); });
       });
   }
 
@@ -193,7 +208,6 @@
 
   // ---- lesson 8: shared sanitiser hooks leaking between two scripts ----
   var HOOK_HOSTILE = '<img src=x onerror="window.__labFired(\'hooks\')"> <b>kept bold</b>';
-  function whenFired(tag, maxMs, cb) { var t0 = Date.now(); (function poll() { if (fired[tag] || Date.now() - t0 >= maxMs) return cb(!!fired[tag]); setTimeout(poll, 50); })(); }
   function galleryHook(node, data) { if (data.attrName === "onerror") data.forceKeepAttr = true; }
   function runHooks(variant) {
     fired.hooks = false;
@@ -209,7 +223,7 @@
         DOMPurify.removeAllHooks();   // clean up so the rest of the lab is unaffected (A forgetting this IS the bug)
       }
       // onerror fires only after the broken image load fails (a network round-trip on a CDN), so poll rather than guess a delay.
-      whenFired("hooks", 2000, function (ran) { note(noteId, ran ? "⚠ Script B's output executed — Script A's permissive hook leaked into the shared DOMPurify, keeping <img onerror>." : "No script ran.", ran ? "bad" : "ok"); report({ demo: "hooks", variant: "vuln", executed: ran, blocked: false, defence: null }); });
+      whenFired("hooks", FIRE_WAIT_MS, function (ran) { note(noteId, ran ? "⚠ Script B's output executed — Script A's permissive hook leaked into the shared DOMPurify, keeping <img onerror>." : "No script ran.", ran ? "bad" : "ok"); report({ demo: "hooks", variant: "vuln", executed: ran, blocked: false, defence: null }); });
     } else {
       // Fixed: Script A sanitises on its OWN private instance; Script B's global sanitize is untouched.
       var dpA = DOMPurify(window);
@@ -217,7 +231,7 @@
       dpA.sanitize('<img src="/lab/static/none.png">');             // A does its permissive thing, privately
       document.getElementById(sinkId).innerHTML = DOMPurify.sanitize(HOOK_HOSTILE);  // B on the clean global
       // give a (wrongly) kept onerror the same time to fire before declaring it safe
-      setTimeout(function () { note(noteId, fired.hooks ? "Unexpected: payload ran." : "Safe: Script A used a private DOMPurify(window) instance, so Script B's global sanitize still stripped onerror (the image stays, inert).", fired.hooks ? "bad" : "ok"); report({ demo: "hooks", variant: "fixed", executed: false, blocked: true, defence: "private DOMPurify instance" }); }, 1200);
+      setTimeout(function () { note(noteId, fired.hooks ? "Unexpected: payload ran." : "Safe: Script A used a private DOMPurify(window) instance, so Script B's global sanitize still stripped onerror (the image stays, inert).", fired.hooks ? "bad" : "ok"); report({ demo: "hooks", variant: "fixed", executed: false, blocked: true, defence: "private DOMPurify instance" }); }, SAFE_WAIT_MS);
     }
   }
 

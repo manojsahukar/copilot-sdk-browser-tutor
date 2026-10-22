@@ -29,22 +29,23 @@ const noteText = (id) => labFrame.evaluate((i) => (document.getElementById(i) ||
 // poll a note from Node (waitForFunction can stall under the lab frame's CSP)
 async function waitNote(id, re, ms = 5000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (re.test(await noteText(id))) return; await sleep(100); } }
 
-await clickRun("reflected", "vuln");  must(/executed/i.test(await noteText("n-reflected-v")), "reflected XSS EXECUTES in the vulnerable variant");
+await clickRun("reflected", "vuln"); await waitNote("n-reflected-v", /executed|No script/); must(/executed/i.test(await noteText("n-reflected-v")), "reflected XSS EXECUTES in the vulnerable variant");
 await clickRun("reflected", "fixed"); must(/safe/i.test(await noteText("n-reflected-f")), "reflected payload is INERT in the fixed variant (textContent)");
-await clickRun("stored", "vuln");     must(/executed/i.test(await noteText("n-stored-v")), "stored XSS EXECUTES in the vulnerable variant");
-await clickRun("dom", "vuln");        must(/executed/i.test(await noteText("n-dom-v")), "DOM XSS EXECUTES in the vulnerable variant");
+await clickRun("stored", "vuln"); await waitNote("n-stored-v", /executed|No script/); must(/executed/i.test(await noteText("n-stored-v")), "stored XSS EXECUTES in the vulnerable variant");
+await clickRun("dom", "vuln"); await waitNote("n-dom-v", /executed|No script/); must(/executed/i.test(await noteText("n-dom-v")), "DOM XSS EXECUTES in the vulnerable variant");
 await clickRun("dom", "fixed");       must(/safe/i.test(await noteText("n-dom-f")), "DOM payload inert + javascript: link neutralised in fixed variant");
 await clickRun("capabilities", "vuln"); await sleep(400);
 const caps = await labFrame.evaluate(() => (document.getElementById("caplist") || {}).innerText || "");
 must(/Read JS-visible cookies/i.test(caps) && /lab_dummy_js/.test(caps), "injected script read the JS-visible dummy cookie");
 must(!/lab_secret_httponly/.test(caps), "injected script could NOT read the HttpOnly cookie");
 must(/fake login/i.test(caps) && /keystroke/i.test(caps) && /echoed/i.test(caps) === false ? true : /Exfiltrated/i.test(caps), "capabilities: fake login, keylogger and exfiltration shown");
-await clickRun("defences", "x"); await sleep(500);
+await clickRun("defences", "x"); await waitNote("n-purify", /Sanitised|Unexpected/); await waitNote("n-csp", /blocked by csp/i);
 must(/blocked by csp/i.test(await noteText("n-csp")), "strict-CSP sub-page BLOCKS the payload (securitypolicyviolation)");
 must(/present to JS: false/i.test(await noteText("n-httponly")) || /secret cookie present to JS: false/i.test(await noteText("n-httponly")), "HttpOnly cookie hidden from JS in defences panel");
 must(/sanitised/i.test(await noteText("n-purify")), "DOMPurify sanitises the hostile markup");
-await clickRun("prompt", "vuln");  must(/executed/i.test(await noteText("n-prompt-v")), "prompt-injection fires via naive innerHTML");
-await clickRun("prompt", "fixed"); must(/neutralised/i.test(await noteText("n-prompt-f")), "prompt-injection neutralised via marked+DOMPurify");
+await clickRun("prompt", "vuln"); await waitNote("n-prompt-v", /executed|No script/); must(/executed/i.test(await noteText("n-prompt-v")), "prompt-injection fires via naive innerHTML");
+await clickRun("prompt", "fixed"); await waitNote("n-prompt-f", /Neutralised|Unexpected/); must(/neutralised/i.test(await noteText("n-prompt-f")), "prompt-injection neutralised via marked+DOMPurify");
+must(await labFrame.evaluate(() => { const a = DOMPurify.sanitize('<a href="mailto:x@y">m</a>'); return /href=/.test(a); }), "prompt (fixed) link hook stays on a PRIVATE instance (global DOMPurify not polluted)");
 
 // ---- lesson 7: sneaky links ----
 await clickRun("links", "vuln");
