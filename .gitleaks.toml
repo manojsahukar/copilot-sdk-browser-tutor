@@ -13,4 +13,5 @@ regexes = [
   '''REPLACE_WITH_64_HEX_CHARS''',
   '''<account-id>''',
   '''XXXXXX''',
+  '''sk-or-v1-LABDUMMY-''',   # the XSS lab's labelled DUMMY key prefix (public/lab.js); real sk-or keys still match
 ]

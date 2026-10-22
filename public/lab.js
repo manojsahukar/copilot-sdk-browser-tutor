@@ -139,6 +139,131 @@
       });
   }
 
+  // ---- lesson 7: sneaky links (naive relative-link check vs strict safeHref) ----
+  var LINK_SAMPLES = [
+    { href: "//evil.example/pwn", about: "protocol-relative //" },
+    { href: "/\\evil.example/pwn", about: "backslash //" },
+    { href: "javascript:window.__labFired('links')", about: "javascript: scheme" },
+    { href: "data:text/html,<b>x</b>", about: "data: document" },
+    { href: "java\tscript:window.__labFired('links')", about: "tab inside scheme" },
+    { href: "  //evil.example", about: "leading spaces" },
+    { href: "/ok\u0000x", about: "control char" },
+    { href: "/guide/csp#top", about: "same-site root path" },
+    { href: "https://good.example/p", about: "absolute https" }
+  ];
+  // The OLD, naive rule the widget used to ship: keep anything that is absolute http(s) OR starts with "/".
+  function naiveKeep(h) { return /^https?:\/\//i.test(h) || /^\//.test(h); }
+  // The strict filter (same logic as the shipped widget's safeHref).
+  function strictKeep(h) {
+    h = String(h == null ? "" : h);
+    if (!h || /[\u0000-\u0020\u007f-\u009f\u2028\u2029\\]/.test(h)) return false;
+    if (/^\/(?![\/\\])/.test(h)) return true;
+    if (!/^https?:\/\/[^\/\\]/i.test(h)) return false;
+    try { var u = new URL(h); return (u.protocol === "https:" || u.protocol === "http:") && !!u.hostname; } catch (e) { return false; }
+  }
+  var LAB_PAGE = location.origin + "/lab/guide";   // a fixed "current page" for resolving; the real URL is never read
+  function resolveWhere(h) {
+    try { var u = new URL(h, LAB_PAGE); var off = u.origin !== location.origin; var scheme = u.protocol.replace(":", ""); return { url: u.href, off: off, scheme: scheme }; }
+    catch (e) { return { url: "(does not resolve to a URL)", off: false, scheme: "" }; }
+  }
+  function runLinks(variant) {
+    var keep = variant === "fixed" ? strictKeep : naiveKeep;
+    var sink = document.getElementById(variant === "fixed" ? "s-links-f" : "s-links-v");
+    var leaked = 0;
+    var rows = LINK_SAMPLES.map(function (s0) {
+      var kept = keep(s0.href), w = resolveWhere(s0.href);
+      // Dangerous = kept AND either a script/document scheme, or it LOOKED relative but resolves off-site.
+      var danger = kept && ((w.scheme && w.scheme !== "http" && w.scheme !== "https") || (w.off && !/^https?:\/\//i.test(s0.href)));
+      if (danger) leaked++;
+      var td = document.createElement("tr");
+      [s0.href, s0.about, kept ? "kept" : "dropped", kept ? w.url : "—"].forEach(function (c, i) {
+        var cell = document.createElement("td"); cell.textContent = c;
+        if (i === 2) cell.className = kept ? (danger ? "bad" : "ok") : "ok";
+        td.appendChild(cell);
+      });
+      return td;
+    });
+    sink.textContent = "";
+    var tbl = document.createElement("table"); tbl.className = "linktbl";
+    var hd = document.createElement("tr"); ["link", "what", keep === strictKeep ? "strict" : "naive", "would navigate to"].forEach(function (h) { var th = document.createElement("th"); th.textContent = h; hd.appendChild(th); }); tbl.appendChild(hd);
+    rows.forEach(function (r) { tbl.appendChild(r); }); sink.appendChild(tbl);
+    if (variant === "fixed") { note("n-links-f", leaked === 0 ? "Safe: every off-site and non-http(s) link lost its href. Only same-site paths and absolute http(s) URLs survive." : "Unexpected: a dangerous link survived.", leaked === 0 ? "ok" : "bad"); report({ demo: "links", variant: "fixed", executed: false, blocked: true, defence: "safeHref" }); }
+    else { note("n-links-v", leaked + " dangerous link(s) kept: the naive 'starts with /' rule lets //evil and /\\evil through — they resolve OFF this site.", leaked ? "bad" : "ok"); report({ demo: "links", variant: "vuln", executed: false, blocked: false, defence: null }); }
+  }
+
+  // ---- lesson 8: shared sanitiser hooks leaking between two scripts ----
+  var HOOK_HOSTILE = '<img src=x onerror="window.__labFired(\'hooks\')"> <b>kept bold</b>';
+  function galleryHook(node, data) { if (data.attrName === "onerror") data.forceKeepAttr = true; }
+  function runHooks(variant) {
+    fired.hooks = false;
+    var sinkId = variant === "fixed" ? "s-hooks-f" : "s-hooks-v", noteId = variant === "fixed" ? "n-hooks-f" : "n-hooks-v";
+    if (!window.DOMPurify) { note(noteId, "DOMPurify not loaded.", "bad"); return; }
+    if (variant === "vuln") {
+      // Script A (a gallery with "fallback image" handlers) adds a PERMISSIVE hook to the SHARED global DOMPurify.
+      DOMPurify.addHook("uponSanitizeAttribute", galleryHook);
+      try {
+        // Script B (a chat box) just wants safe text; it sanitises a hostile reply on the SAME global, inheriting A's hooks.
+        document.getElementById(sinkId).innerHTML = DOMPurify.sanitize(HOOK_HOSTILE);
+      } finally {
+        DOMPurify.removeAllHooks();   // clean up so the rest of the lab is unaffected (A forgetting this IS the bug)
+      }
+      setTimeout(function () { note(noteId, fired.hooks ? "⚠ Script B's output executed — Script A's permissive hook leaked into the shared DOMPurify, keeping <img onerror>." : "No script ran.", fired.hooks ? "bad" : "ok"); report({ demo: "hooks", variant: "vuln", executed: !!fired.hooks, blocked: false, defence: null }); }, 60);
+    } else {
+      // Fixed: Script A sanitises on its OWN private instance; Script B's global sanitize is untouched.
+      var dpA = DOMPurify(window);
+      dpA.addHook("uponSanitizeAttribute", galleryHook);            // the SAME permissive hook, on A's private instance
+      dpA.sanitize('<img src="/lab/static/none.png">');             // A does its permissive thing, privately
+      document.getElementById(sinkId).innerHTML = DOMPurify.sanitize(HOOK_HOSTILE);  // B on the clean global
+      setTimeout(function () { note(noteId, fired.hooks ? "Unexpected: payload ran." : "Safe: Script A used a private DOMPurify(window) instance, so Script B's global sanitize still stripped onerror (the image stays, inert).", fired.hooks ? "bad" : "ok"); report({ demo: "hooks", variant: "fixed", executed: false, blocked: true, defence: "private DOMPurify instance" }); }, 60);
+    }
+  }
+
+  // ---- lesson 9: CSP with third parties (two sub-frames with their own meta CSP) ----
+  function runCsp3p(variant) {
+    var allow = variant === "fixed";
+    var frame = document.getElementById(allow ? "csp3p-allow" : "csp3p-block");
+    note(allow ? "n-csp3p-f" : "n-csp3p-v", "Loading…", "");
+    frame.src = "/lab/csp3p?mode=" + (allow ? "allow" : "block") + "&t=" + Date.now();
+  }
+
+  // ---- lesson 10: where your API key lives (DUMMY key; sessionStorage vs 7-day localStorage) ----
+  var K_SESS = "lab_demo_key_session", K_LOCAL = "lab_demo_key_local";
+  function maskKey(k) { k = String(k || ""); return k ? k.slice(0, 11) + "\u2026" + k.slice(-4) + " (" + k.length + " chars)" : "(absent)"; }
+  function readLocalKey() { try { var o = JSON.parse(localStorage.getItem(K_LOCAL) || "null"); return o && o.exp > Date.now() ? o : null; } catch (e) { return null; } }
+  function keyStatus() {
+    var sk = sessionStorage.getItem(K_SESS), lo = readLocalKey();
+    note("n-key-session", "sessionStorage[" + K_SESS + "] = " + maskKey(sk) + (sk ? " \u2014 lives only in THIS tab; gone when it closes." : " \u2014 nothing stored (or the tab was closed)."), sk ? "bad" : "ok");
+    note("n-key-local", lo ? ("localStorage[" + K_LOCAL + "] = " + maskKey(lo.k) + " \u2014 survives new tabs; expires " + new Date(lo.exp).toISOString().slice(0, 10) + ".") : ("localStorage[" + K_LOCAL + "] = (absent/expired)"), lo ? "bad" : "ok");
+  }
+  function runKeystore(variant) {
+    if (variant === "clear") { sessionStorage.removeItem(K_SESS); localStorage.removeItem(K_LOCAL); document.getElementById("s-keystore").textContent = ""; keyStatus(); return; }
+    if (variant === "seed") {
+      var key = "sk-or-v1-LABDUMMY-" + Math.random().toString(36).slice(2, 10);   // DUMMY, never a real key
+      sessionStorage.setItem(K_SESS, key);
+      localStorage.setItem(K_LOCAL, JSON.stringify({ k: key, exp: Date.now() + 7 * 24 * 3600e3 }));
+      document.getElementById("s-keystore").textContent = "Stored the SAME dummy key two ways. Now fire the injected script, or simulate closing the tab.";
+      keyStatus(); return;
+    }
+    if (variant === "newtab") {
+      // A new tab gets a fresh (empty) sessionStorage but shares localStorage. Simulate by dropping the tab key only.
+      sessionStorage.removeItem(K_SESS);
+      document.getElementById("s-keystore").textContent = "Simulated a new tab: sessionStorage is empty here, but the 7-day localStorage copy is still readable.";
+      keyStatus(); return;
+    }
+    // inject: a curated payload reads BOTH stores (neither is HttpOnly) and 'exfiltrates' the dummy values to the echo.
+    if (!sessionStorage.getItem(K_SESS) && !readLocalKey()) runKeystore("seed");
+    fired.keystore = true;
+    var sk = sessionStorage.getItem(K_SESS), lo = readLocalKey();
+    var ul = document.getElementById("s-keystore"); ul.textContent = "";
+    function line(t) { var d = document.createElement("div"); d.textContent = t; ul.appendChild(d); }
+    line("Injected script read sessionStorage key: " + maskKey(sk));
+    line("Injected script read remembered localStorage key: " + maskKey(lo && lo.k));
+    exfil("dummy-key " + maskKey(sk || (lo && lo.k))).then(function (r) { line("'Exfiltrated' the dummy key to the lab echo endpoint; it echoed: " + r.echoed); });
+    keyStatus();
+    note("n-key-session", "⚠ Any same-origin script read it — sessionStorage is NOT HttpOnly.", "bad");
+    report({ demo: "keystore", variant: "inject", executed: true, blocked: false, defence: null });
+  }
+
   function run(demo, variant) {
     if (demo === "reflected") runReflected(variant);
     else if (demo === "stored") runStored(variant);
@@ -148,6 +273,10 @@
     else if (demo === "cap-reset") resetCap();
     else if (demo === "defences") runDefences();
     else if (demo === "prompt") runPrompt(variant);
+    else if (demo === "links") runLinks(variant);
+    else if (demo === "hooks") runHooks(variant);
+    else if (demo === "csp3p") runCsp3p(variant);
+    else if (demo === "keystore") runKeystore(variant);
   }
 
   function enableCustom() { document.getElementById("custom-input").disabled = false; document.getElementById("custom-input").placeholder = "e.g. <img src=x onerror=...>"; document.getElementById("custom-run").disabled = false; }
@@ -166,9 +295,27 @@
     var d = e.data || {};
     // messages from our own strict-CSP sub-frame (same lab origin) report the CSP block
     if (e.origin === location.origin && d.type === "csp-blocked") { note("n-csp", "Blocked by CSP \u2014 the strict sub-page raised securitypolicyviolation (" + (d.directive || "script-src") + "). The same payload that fired above is inert here.", "ok"); return; }
+    if (e.origin === location.origin && d.type === "csp3p-report") {
+      var pol = document.getElementById("csp3p-policy"); if (pol && d.policy) pol.textContent = "meta CSP (" + d.mode + "):\n" + d.policy;
+      if (d.mode === "allow") {
+        var dirs = (d.violations || []).map(function (v) { return v.directive; });
+        note("n-csp3p-f", dirs.length ? ("Unexpected violations: " + dirs.join(", ")) : "Allowed: script, stylesheet and iframe loaded with ZERO violations because the policy lists the third party.", dirs.length ? "bad" : "ok");
+        if (d.done) { fired["csp3p-allow"] = dirs.length === 0; report({ demo: "csp3p", variant: "fixed", executed: false, blocked: false, defence: "CSP allowlist (script/style/frame-src)" }); }
+      } else {
+        var blocked = {}; (d.violations || []).forEach(function (v) { blocked[v.directive] = true; });
+        var names = Object.keys(blocked);
+        note("n-csp3p-v", names.length ? ("Blocked by CSP: " + names.join(", ") + ". Each load fired a securitypolicyviolation and no request ever reached giscus.app.") : "Loading…", "ok");
+        if (d.done) { fired["csp3p-block"] = names.length > 0; report({ demo: "csp3p", variant: "vuln", executed: false, blocked: true, defence: "CSP blocks un-allowlisted third parties" }); }
+      }
+      return;
+    }
     if (e.origin !== MAIN) return;                         // strict origin check for control messages from the app
     if (d.type === "bt-lab-init" && typeof d.token === "string") { token = d.token; enableCustom(); }
-    else if (d.type === "bt-lab-run") run(String(d.demo || ""), String(d.variant || "vuln"));
+    else if (d.type === "bt-lab-run") {
+      var dm = String(d.demo || ""); run(dm, String(d.variant || "vuln"));
+      var sec = /^[a-z0-9]+$/.test(dm) && document.querySelector('section[data-demo="' + dm + '"]');
+      if (sec && sec.scrollIntoView) sec.scrollIntoView({ block: "start" });
+    }
   });
   // tell the parent we're ready so it can hand us a login token
   try { parent.postMessage({ type: "bt-lab-ready" }, MAIN || "*"); } catch (e) {}

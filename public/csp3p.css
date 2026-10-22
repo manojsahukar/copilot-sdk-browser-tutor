@@ -1,0 +1,2 @@
+/* Stand-in for a third-party widget stylesheet (lesson 9). Same-origin so the lab makes no external call. */
+.c3list { outline: 0; }

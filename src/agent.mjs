@@ -9,7 +9,7 @@ import path from "node:path";
 import { CopilotClient } from "@github/copilot-sdk";
 import { SYSTEM_PROMPT } from "./prompt.mjs";
 import { GOTCHAS } from "./gotchas.mjs";
-import { DEMOS, DEMO_IDS } from "./demos.mjs";
+import { DEMOS, DEMO_IDS, LAB_LESSONS, LAB_LESSON_INFO } from "./demos.mjs";
 import { refreshGitHubToken } from "./appsecrets.mjs";
 import { buildProvider, OR_DEFAULT_MODEL, isAllowedModel } from "./openrouter.mjs";
 import { WIDGET_SCHEMA, CHANGES_SCHEMA, validateSpec, mergeChanges } from "./widgets.mjs";
@@ -149,12 +149,20 @@ function tools(ctx) {
     {
       name: "run_demo",
       description: "Returns the curated lesson for one live browser-capability demo (what it does, what a site learns, how to revoke) and, if the user has tapped Run on the Demos page, the metadata-only result of their run. The model may ONLY pick a demo by name from the enum; it never supplies code. Live demos run as static code in the user's browser; nothing executes on the server and no media/precise location is returned here.",
-      parameters: { type: "object", properties: { demo: { type: "string", enum: DEMO_IDS, description: "Which demo to explain/report" } }, required: ["demo"] },
-      handler: async ({ demo } = {}) => {
+      parameters: { type: "object", properties: { demo: { type: "string", enum: DEMO_IDS, description: "Which demo to explain/report" },
+        lesson: { type: "string", enum: LAB_LESSONS, description: "Only with demo=xss_lab: which lab lesson to focus on (links, hooks, csp3p, keystore are the newer ones). Picking a lesson runs nothing; the user taps its preset." } }, required: ["demo"] },
+      handler: async ({ demo, lesson } = {}) => {
         const meta = DEMOS[demo];
         if (!meta) return { error: "unknown demo", valid: DEMO_IDS };
         const result = ctx.demoResults && ctx.demoResults[demo];
-        return { ...meta, lastRunResult: result || null, ranByUser: !!result, hint: result ? undefined : "Not run yet. Ask the user to open the Demos page and tap Run on this demo; results are metadata only." };
+        const out = { ...meta, lastRunResult: result || null, ranByUser: !!result, hint: result ? undefined : "Not run yet. Ask the user to open the Demos page and tap Run on this demo; results are metadata only." };
+        if (demo === "xss_lab" && lesson) {
+          if (!LAB_LESSONS.includes(lesson)) return { error: "unknown lesson", valid: LAB_LESSONS };
+          const runs = (result && Array.isArray(result.runs) ? result.runs : []).filter((r) => r && r.demo === lesson);
+          out.lesson = { id: lesson, ...(LAB_LESSON_INFO[lesson] || {}), runs, ranByUser: runs.length > 0,
+            hint: runs.length ? undefined : "Not run yet. Ask the user to open Demos \u2192 Script injection lab and tap the preset(s) named above." };
+        }
+        return out;
       },
     },
     {

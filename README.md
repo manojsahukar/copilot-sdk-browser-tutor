@@ -37,6 +37,18 @@ only metadata back to the tutor.
   DOMPurify, strict CSP + `securitypolicyviolation`, HttpOnly, scheme checks, Trusted Types), and prompt-injection-to-XSS — each with a
   vulnerable vs fixed variant. It is isolated so curiosta.com never becomes a real XSS/phishing host (own origin, host-only session
   cookie, no URL-borne payloads, only usable when framed by the app, echo-only exfiltration).
+  Four further lessons (`run_demo` `xss_lab` with `lesson=`), each vulnerable vs fixed and launched only by a tap on a curated preset:
+  - `links` **Sneaky links**: a naive "starts with `/` or `http`" check vs the strict `safeHref` filter, over `//evil.example`,
+    `/\evil.example`, `javascript:`, `data:`, a tab inside the scheme, leading spaces and a control character. Each row shows the
+    resolved destination (`new URL(href, page)`); nothing navigates.
+  - `hooks` **Shared sanitiser hooks**: script A adds a permissive `uponSanitizeAttribute` hook (force-keeps `onerror`) to the
+    shared global DOMPurify and script B's `sanitize()` lets `<img onerror>` run; fixed by giving A a private `DOMPurify(window)`.
+  - `csp3p` **CSP with third parties**: a Giscus-style embed under a `<meta>` CSP. The tight policy refuses the real `giscus.app`
+    script, stylesheet and iframe before any request (each raises `securitypolicyviolation`, reported in the lab); the
+    recommended Giscus policy (see the widget section) admits same-origin stand-ins with zero violations, so the lab never calls
+    a third party. Explains that a meta CSP cannot set `frame-ancestors`, `report-uri`/`report-to` or `sandbox`.
+  - `keystore` **Where your API key lives**: a DUMMY `sk-or-v1-LABDUMMY-…` key in sessionStorage (tab-only) and in a 7-day
+    localStorage "remember"; an injected preset reads both, and a simulated new tab shows which survives (gotcha `client-side-byok-key`).
 - **Where your data lives in the browser**: a `storage_inspector` demo shows this site's own localStorage (including the saved chat
   transcript — key name, size, message count, expiry), sessionStorage, IndexedDB and the JS-visible cookies (the HttpOnly `bt_sess`
   session cookie is deliberately absent), plus quota via `navigator.storage.estimate()` — and explains cookies vs Web Storage, origin
@@ -240,6 +252,13 @@ The client (`public/widgets.js`) maps the spec onto chart options with a pure fu
 (`v2`, `v3` …) with **undo** (≤10 versions). Specs (never data) persist per login in `localStorage` as `bt_widgets` (≤16 widgets, 7-day
 expiry, wiped by *Clear site data*), alongside `bt_chat`.
 
+**Series colours.** Every data series in a chart gets its own colour from a fixed colour-blind-safe palette (Okabe–Ito hues, tuned
+separately for dark and light backgrounds), assigned over the *expanded* data series, so a `group_by` series never repeats a colour.
+The app's hosts keep stable colours wherever they appear (CloudFront distributions and health endpoints): **main** sky blue,
+**sibling** orange, **lab** bluish green, **ready** reddish purple. An explicit spec `color` is honoured when it maps to one series;
+a single colour on a grouped series is not stamped onto every group. `scripts/widgets-e2e.mjs` asserts distinct colours for every
+multi-series chart.
+
 **Chart library: Apache ECharts 5.6 (Apache-2.0)**, as a custom tree-shaken build (`scripts/build-echarts.sh`, line/bar/pie +
 markLine, canvas renderer, ~181 KB gzip). It is vendored, self-hosted and **lazy-loaded** only when the first chart renders. It works under the app's
 strict CSP (`script-src 'self'`, no `unsafe-eval`). The build fails if `eval`/`new Function` appears (the only one in ECharts is
@@ -324,7 +343,7 @@ node scripts/unit-tests.mjs        # mode:"empty" assertion + deny-by-default pe
 node scripts/injection-tests.mjs   # prompt-injection vectors (UA, Referer, cookie name) are neutralised; secret masking
 node scripts/openrouter-e2e.mjs    # mocked OpenRouter PKCE: login params, state rejection, exchange, key never exposed, disconnect
 node scripts/markdown-xss.mjs      # model output with <script>/<img onerror>/javascript: links is neutralised (marked + DOMPurify)
-node scripts/xss-lab-e2e.mjs       # XSS lab: payloads fire in vuln variants, blocked in fixed; isolation, frame-ancestors, no URL payloads (needs the lab origin on LAB_PORT)
+node scripts/xss-lab-e2e.mjs       # XSS lab: payloads fire in vuln variants, blocked in fixed; isolation, frame-ancestors, no URL payloads; lessons links/hooks/csp3p/keystore (needs the lab origin on LAB_PORT)
 node scripts/widget-unit.mjs       # client-side widget: PKCE S256, BM25 retrieval, page-text cleaning, delimited context builder, link filter (safeHref), data-* option parsing
 node scripts/widget-e2e.mjs        # widget pilot: real-touch mobile open/close/reopen (backdrop, Android back), no overflow, 44px targets, pre-connect prompt; mocked connect -> chat (cited) -> disconnect
 node scripts/widget-security-e2e.mjs    # widget: //-link block in the real renderer, DOMPurify hook scoping + host-library isolation, recommended Giscus CSP with the REAL giscus.app client (zero violations), CSP-blocked message, data-* options, unsent question kept across OAuth

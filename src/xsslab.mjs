@@ -73,6 +73,10 @@ function headers(kind, mainOrigin, extra = {}) {
     common["Content-Security-Policy"] =
       `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; ` +
       `connect-src 'self'; frame-ancestors 'self' ${mainOrigin}; base-uri 'none'; form-action 'self'; object-src 'none'`;
+  } else if (kind === "frameonly") {
+    // CSP lesson sub-page: ONLY framing rules here (a <meta> CSP cannot set frame-ancestors). Its resource policy
+    // is the <meta> tag in the page itself, so a header policy must not intersect with (and mask) it.
+    common["Content-Security-Policy"] = `frame-ancestors 'self' ${mainOrigin}; base-uri 'none'; object-src 'none'`;   // every ancestor is checked
   } else {
     common["Content-Security-Policy"] = `default-src 'self'; frame-ancestors ${mainOrigin}; base-uri 'none'`;
   }
@@ -100,6 +104,11 @@ export function handleLab(req, res, p, ctx) {
     return sendLab(res, 200, labHtml(mainOrigin), "text/html; charset=utf-8", headers("vuln", mainOrigin, { "Set-Cookie": [jsCk, hoCk] }));
   }
   if (p === "/lab/strict" || p === "/lab/strict/") return sendLab(res, 200, strictHtml(mainOrigin), "text/html; charset=utf-8", headers("strict", mainOrigin));
+  if (p === "/lab/csp3p") {
+    // Lesson 9. The ONLY thing read from the URL is a two-value mode switch (block|allow); no payload, no text echoed.
+    const mode = new URL(req.url, "http://x").searchParams.get("mode") === "allow" ? "allow" : "block";
+    return sendLab(res, 200, csp3pHtml(mode), "text/html; charset=utf-8", headers("frameonly", mainOrigin));
+  }
   if (p.startsWith("/lab/static/")) return serveLabStatic(res, p.slice("/lab/static/".length), mainOrigin);
 
   // Echo endpoint: the ONLY place a payload can "exfiltrate" to. It just reflects back what it captured.
@@ -197,6 +206,49 @@ function labHtml(mainOrigin) {
     </div>
     <div class=runs><button data-run=prompt data-variant=vuln>Render hostile "model output" naively</button><button data-run=prompt data-variant=fixed class=secondary>Render via marked + DOMPurify</button></div>
   </section>
+  <section class=demo data-demo=links>
+    <h2>7 · Sneaky links <span class=sub>a naive "is it relative?" check vs a strict filter</span></h2>
+    <div class=cols>
+      <div class=card vuln><h3>Naive check <span class=tag>starts with / or http</span></h3><div class=sink id=s-links-v></div><div class=note id=n-links-v></div></div>
+      <div class=card fixed><h3>Strict filter <span class=tag>safeHref</span></h3><div class=sink id=s-links-f></div><div class=note id=n-links-f></div></div>
+    </div>
+    <div class=runs><button data-run=links data-variant=vuln>Check with the naive rule</button><button data-run=links data-variant=fixed class=secondary>Check with the strict filter</button></div>
+    <p class=fineprint>Nothing navigates. Each row shows where the browser would really send you (<code>new URL(href, this page)</code>). Links are shown as text, never as live anchors.</p>
+  </section>
+  <section class=demo data-demo=hooks>
+    <h2>8 · Shared sanitiser hooks <span class=sub>two scripts, one global DOMPurify</span></h2>
+    <div class=cols>
+      <div class=card vuln><h3>Shared global <span class=tag>hook leaks</span></h3><div class=sink id=s-hooks-v></div><div class=note id=n-hooks-v></div></div>
+      <div class=card fixed><h3>Private instance <span class=tag>DOMPurify(window)</span></h3><div class=sink id=s-hooks-f></div><div class=note id=n-hooks-f></div></div>
+    </div>
+    <div class=runs><button data-run=hooks data-variant=vuln>Run with one shared DOMPurify</button><button data-run=hooks data-variant=fixed class=secondary>Run with a private instance</button></div>
+    <p class=fineprint>Script A (an "image gallery") adds a permissive hook that force-keeps <code>onerror</code> (for its own fallback images). Script B (a chat box) sanitises a hostile reply and expects <code>onerror</code> stripped.</p>
+  </section>
+  <section class=demo data-demo=csp3p>
+    <h2>9 · CSP with third parties <span class=sub>a Giscus-style comments embed under a meta CSP</span></h2>
+    <div class=cols>
+      <div class=card vuln><h3>Policy forgets the third party</h3><iframe id=csp3p-block class=cspframe title="tight policy"></iframe><div class=note id=n-csp3p-v></div></div>
+      <div class=card fixed><h3>Recommended Giscus policy</h3><iframe id=csp3p-allow class=cspframe title="recommended policy"></iframe><div class=note id=n-csp3p-f></div></div>
+    </div>
+    <div class=runs><button data-run=csp3p data-variant=vuln>Load under the tight policy</button><button data-run=csp3p data-variant=fixed class=secondary>Load under the Giscus policy</button></div>
+    <pre class=policy id=csp3p-policy></pre>
+    <p class=fineprint>The tight page tries the real <code>giscus.app</code> script, stylesheet and iframe; CSP refuses each one before any request leaves the browser and fires a <code>securitypolicyviolation</code>. The recommended page loads same-origin stand-ins, so the lab never calls a third party. A <code>&lt;meta&gt;</code> CSP cannot set <code>frame-ancestors</code>, <code>report-uri</code>/<code>report-to</code> or <code>sandbox</code>; those need a real header (this lab sends <code>frame-ancestors</code> as one).</p>
+  </section>
+  <section class=demo data-demo=keystore>
+    <h2>10 · Where your API key lives <span class=sub>sessionStorage vs a 7-day localStorage "remember", with a DUMMY key</span></h2>
+    <div class=cols>
+      <div class=card vuln><h3>Tab only <span class=tag>sessionStorage</span></h3><div class=note id=n-key-session></div></div>
+      <div class=card fixed><h3>Remember 7 days <span class=tag>localStorage</span></h3><div class=note id=n-key-local></div></div>
+    </div>
+    <div class=runs>
+      <button data-run=keystore data-variant=seed class=secondary>Store a dummy key both ways</button>
+      <button data-run=keystore data-variant=inject>Fire injected script (reads both)</button>
+      <button data-run=keystore data-variant=newtab class=secondary>Close &amp; reopen the tab</button>
+      <button data-run=keystore data-variant=clear class=secondary>Clear</button>
+    </div>
+    <div class=sink id=s-keystore></div>
+    <p class=fineprint>Dummy keys only (<code>sk-or-v1-LABDUMMY-…</code>), never a real OpenRouter key. Neither store is HttpOnly: any script on the page reads both. The difference is lifetime. See the <code>client-side-byok-key</code> gotcha.</p>
+  </section>
   <section class=demo data-demo=custom>
     <h2>Custom payload <span class=sub>length-capped; unlocked only when you're signed in on the main app</span></h2>
     <div class=card>
@@ -209,6 +261,23 @@ function labHtml(mainOrigin) {
 <script src="/lab/static/vendor/purify.min.js"></script>
 <script src="/lab/static/vendor/marked.min.js"></script>
 <script src="/lab/static/lab.js"></script>
+</body></html>`;
+}
+
+// Lesson 9 policies. BLOCK forgets the third party; ALLOW is the README's recommended Giscus policy, with 'self' added to
+// frame-src only because the lab's stand-in iframe is same-origin (a real host needs just https://giscus.app there).
+export const CSP3P_BLOCK = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'none'; connect-src 'self'; base-uri 'none'";
+export const CSP3P_ALLOW = "default-src 'self'; script-src 'self' https://giscus.app; style-src 'self' https://giscus.app; img-src 'self' data:; frame-src 'self' https://giscus.app; connect-src 'self'; base-uri 'none'";
+function csp3pHtml(mode) {
+  const policy = mode === "allow" ? CSP3P_ALLOW : CSP3P_BLOCK;
+  return `<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta http-equiv="Content-Security-Policy" content="${policy}">
+<meta name=viewport content="width=device-width,initial-scale=1"><meta name=color-scheme content=dark>
+<title>CSP third-party lesson (${mode})</title><link rel=stylesheet href="/lab/static/lab.css"></head>
+<body class="strict c3" data-mode="${mode}">
+<p class=mini id=c3-head>${mode === "allow" ? "Recommended policy: loading same-origin stand-ins for the widget's script, stylesheet and iframe…" : "Tight policy: trying the real giscus.app script, stylesheet and iframe…"}</p>
+<ul class=c3list id=c3-list></ul>
+<script src="/lab/static/lab-csp3p.js"></script>
 </body></html>`;
 }
 

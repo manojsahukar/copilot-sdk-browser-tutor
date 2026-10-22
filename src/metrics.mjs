@@ -202,7 +202,7 @@ async function cwSeries(m, s, spec, P) {
   if (m.dims === "fn") targets = [{ name: s.label || m.label, dims: [{ Name: "FunctionName", Value: FN_NAME }], global: false }];
   else {
     const which = spec.group_by === "distribution" ? ["main", "sibling", "lab"] : [(spec.filters && spec.filters.distribution) || "main"];
-    targets = which.filter((w) => DIST[w]).map((w) => ({ name: spec.group_by === "distribution" ? w : `${s.label || m.label}${which.length === 1 && w !== "main" ? ` (${w})` : ""}`, dims: [{ Name: "DistributionId", Value: DIST[w] }, { Name: "Region", Value: "Global" }], global: true }));
+    targets = which.filter((w) => DIST[w]).map((w) => ({ entity: w, name: spec.group_by === "distribution" ? w : `${s.label || m.label}${which.length === 1 && w !== "main" ? ` (${w})` : ""}`, dims: [{ Name: "DistributionId", Value: DIST[w] }, { Name: "Region", Value: "Global" }], global: true }));
     if (!targets.length) return { series: [], samples: 0, note: "CloudFront distribution ids are not configured on this server" };
   }
   if (!CW_ENABLED) return { series: [], samples: 0, note: "CloudWatch reads are disabled on this server (METRICS_CLOUDWATCH=0)" };
@@ -228,7 +228,7 @@ async function cwSeries(m, s, spec, P) {
         const zeroFill = ["sum"].includes(s.agg);
         const points = P.buckets.map((b) => [b, map.has(b) ? r3(map.get(b)) : (zeroFill ? 0 : null)]);
         const tot = byId[`t${i}`]; const total = tot && tot.Values && tot.Values.length ? r3(tf(tot.Values[0])) : (zeroFill ? 0 : null);
-        out.push({ name: t.name, points, total, n: (x.Values || []).length });
+        out.push({ name: t.name, ...(t.entity ? { entity: t.entity } : {}), points, total, n: (x.Values || []).length });
       });
     }
     return { series: out, samples: out.reduce((a, b) => a + b.n, 0) };
@@ -247,7 +247,7 @@ async function healthSeries(m, s, spec, P) {
     const val = (r) => (m.field === "st" ? upOf(r[`${e}_st`]) : r[`${e}_${m.field}`]);
     const byB = new Map(); const all = [];
     for (const r of rows) { const v = val(r); if (v == null) continue; all.push(v); const b = P.from + Math.floor((r.t - P.from) / P.step) * P.step; if (!byB.has(b)) byB.set(b, []); byB.get(b).push(v); }
-    return { name: spec.group_by === "endpoint" ? ENDPOINTS[e] : (s.label || `${m.label} · ${ENDPOINTS[e]}`), points: P.buckets.map((b) => [b, byB.has(b) ? r3(aggregate(byB.get(b), s.agg)) : null]), total: r3(aggregate(all, s.agg)), n: all.length };
+    return { name: spec.group_by === "endpoint" ? ENDPOINTS[e] : (s.label || `${m.label} · ${ENDPOINTS[e]}`), entity: e, points: P.buckets.map((b) => [b, byB.has(b) ? r3(aggregate(byB.get(b), s.agg)) : null]), total: r3(aggregate(all, s.agg)), n: all.length };
   });
   return { series, samples: rows.length, firstAt: rows.length ? rows[0].t : null, health: true };
 }
@@ -362,12 +362,13 @@ export async function healthSummary(readinessFn) {
 // ---------- example data (clearly labelled; only when the spec asks for example_data) ----------
 function exampleSeries(m, s, spec, P) {
   const names = spec.group_by === "endpoint" ? Object.values(ENDPOINTS) : spec.group_by === "distribution" ? ["main", "sibling", "lab"] : spec.group_by !== "none" ? ["group A", "group B", "group C"] : [s.label || m.label];
+  const ents = spec.group_by === "endpoint" ? Object.keys(ENDPOINTS) : spec.group_by === "distribution" ? ["main", "sibling", "lab"] : [];
   const base = { ms: 2500, "%": m.src === "health" || m.transform ? 99.5 : 1.5, days: 60, count: 12, bytes: 4e6, tokens: 900, score: 0.05, MB: 30 }[m.unit] || 10;
   let seed = [...(m.label + s.agg)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
   const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
   return { series: names.map((name, gi) => {
     const points = P.buckets.map((b, i) => [b, r3(base * (1 + gi * 0.35) * (1 + 0.4 * Math.sin(i / 6 + gi)) * (0.8 + 0.4 * rnd()))]);
-    return { name, points, total: r3(aggregate(points.map((p) => p[1]), s.agg === "count" ? "sum" : s.agg)), n: points.length };
+    return { name, ...(ents[gi] ? { entity: ents[gi] } : {}), points, total: r3(aggregate(points.map((p) => p[1]), s.agg === "count" ? "sum" : s.agg)), n: points.length };
   }), samples: P.buckets.length * names.length };
 }
 
@@ -389,7 +390,9 @@ export async function resolveData(spec, { uh }) {
     if (r.note) notes.push(r.note);
     anyReal += r.samples || 0;
     if (r.firstAt && (!firstAt || r.firstAt < firstAt)) firstAt = r.firstAt;
-    for (const x of r.series) series.push({ ...x, metric: s.metric, unit: m.unit, agg: s.agg, axis: s.axis || "left", color: s.color || null, source: m.src });
+    // An explicit spec colour applies only when the spec series maps to ONE data series; a grouped series (by distribution /
+    // endpoint / engine...) must not paint every group the same colour, so its members get distinct palette/entity colours.
+    for (const x of r.series) series.push({ ...x, metric: s.metric, unit: m.unit, agg: s.agg, axis: s.axis || "left", color: (r.series.length === 1 && s.color) || null, source: m.src });
   }
   // hard cap on points shipped to the browser/model
   let total = series.reduce((a, x) => a + x.points.length, 0);

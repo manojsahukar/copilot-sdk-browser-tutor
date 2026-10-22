@@ -1,7 +1,8 @@
 // Fast, offline assertions for the security-critical invariants. Run: node scripts/unit-tests.mjs
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf, validateFollowups } from "../src/agent.mjs";
+import { clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf, validateFollowups, _toolsForTest } from "../src/agent.mjs";
+import { LAB_LESSONS } from "../src/demos.mjs";
 import { makeVerifier, challengeFor, buildProvider, isAllowedModel, OR_BASE_URL, OR_DEFAULT_MODEL, OR_MODELS, OR_KEY_RE } from "../src/openrouter.mjs";
 
 let pass = 0;
@@ -64,5 +65,23 @@ ok("truncates to <=80 chars and strips markdown/control chars", () => {
   assert.ok(r[0].length <= 80); assert.ok(!/[*`\u0000]/.test(r[0])); assert.equal(r[1], "a b");
 });
 ok("non-array / junk yields empty list", () => { assert.deepEqual(validateFollowups(null), []); assert.deepEqual(validateFollowups([1, {}, "", "   "]), []); });
+
+console.log("run_demo: xss_lab lessons are names from an enum, never code");
+{
+  const ctx = { demoResults: { xss_lab: { runs: [{ demo: "links", variant: "vuln", executed: false, blocked: false }, { demo: "dom", variant: "vuln", executed: true }] } } };
+  const raw = _toolsForTest(ctx).find((t) => t.name === "run_demo");
+  const unwrap = (w) => JSON.parse(w.untrusted_data.split("\n").slice(1, -1).join("\n"));
+  const rd = { parameters: raw.parameters, handler: async (a) => unwrap(await raw.handler(a)) };
+  const en = rd.parameters.properties.lesson.enum;
+  ok("lesson enum lists the four new lessons", () => { for (const l of ["links", "hooks", "csp3p", "keystore"]) assert.ok(en.includes(l)); assert.deepEqual(en, LAB_LESSONS); });
+  const r1 = await rd.handler({ demo: "xss_lab", lesson: "links" });
+  ok("lesson notes + only that lesson's runs are returned", () => { assert.equal(r1.lesson.id, "links"); assert.equal(r1.lesson.runs.length, 1); assert.ok(/\/\//.test(r1.lesson.teaches)); });
+  const r2 = await rd.handler({ demo: "xss_lab", lesson: "keystore" });
+  ok("unrun lesson gets a 'tap the preset' hint and links its gotcha", () => { assert.equal(r2.lesson.ranByUser, false); assert.ok(/tap/.test(r2.lesson.hint)); assert.deepEqual(r2.lesson.gotchas, ["client-side-byok-key"]); });
+  const r3 = await rd.handler({ demo: "xss_lab", lesson: "<script>" });
+  ok("unknown lesson rejected", () => assert.equal(r3.error, "unknown lesson"));
+  const r4 = await rd.handler({ demo: "camera", lesson: "links" });
+  ok("lesson ignored for non-lab demos", () => assert.equal(r4.lesson, undefined));
+}
 
 console.log(`\nALL UNIT TESTS PASSED (${pass})`);

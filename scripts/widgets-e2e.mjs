@@ -51,6 +51,55 @@ for (const [name, dev] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
   must(m.n === presets.length && m.canvases + m.empty >= presets.length && m.canvases >= presets.length - 1, `metrics board renders ${presets.length} pinned cards (${m.canvases} charts, ${m.empty} honest empty states: per-user history is thin locally)`);
   must(!m.overflow, "no horizontal overflow on metrics board");
   await p.screenshot({ path: `docs/widgets-metrics-${name}.png`, fullPage: true });
+  // Colours: every multi-series chart on the board draws each series in a DIFFERENT colour (bug: main+sibling both blue).
+  const cols = await p.evaluate(() => [...document.querySelectorAll("#metricsBoard .wcard")].map((c) => {
+    const div = [...c.querySelectorAll("*")].find((e) => e._chart); const inst = div && div._chart; if (!inst) return null;
+    const o = inst.getOption(); const ss = o.series || [];
+    const list = ss[0] && ss[0].type === "pie" ? (ss[0].data || []).map((d) => [d.name, d.itemStyle && d.itemStyle.color]) : ss.map((x) => [x.name, x.itemStyle && x.itemStyle.color]);
+    return { id: c.dataset.widget, title: (c.querySelector(".w-title") || {}).textContent || "", list };
+  }).filter(Boolean));
+  const multi = cols.filter((c) => c.list.length > 1);
+  must(multi.length >= 2, `metrics board has multi-series charts to check (${multi.length})`);
+  for (const c of multi) must(c.list.every(([, col]) => /^#[0-9a-f]{6}$/i.test(col || "")) && new Set(c.list.map(([, col]) => col.toLowerCase())).size === c.list.length,
+    `distinct colours per series in "${c.title || c.id}": ${c.list.map(([n, col]) => n + "=" + col).join(", ")}`);
+  const cf = cols.find((c) => c.list.some(([n]) => n === "main") && c.list.some(([n]) => n === "sibling"));
+  if (cf) {
+    const m2 = Object.fromEntries(cf.list);
+    must(m2.main === "#56b4e9" && m2.sibling === "#e69f00" && (!m2.lab || m2.lab === "#00c08b"), "CloudFront by distribution: stable host colours main=sky blue, sibling=orange, lab=green");
+    if (name === "mobile") {
+      const card = await p.$(`#metricsBoard .wcard[data-widget="${cf.id}"]`);
+      await card.evaluate((el) => el.scrollIntoView({ block: "center" })); await new Promise((r) => setTimeout(r, 400));
+      await card.screenshot({ path: "docs/widgets-cf-by-distribution-390.png" });
+      must(true, "saved docs/widgets-cf-by-distribution-390.png");
+    }
+  } else must(false, "found the CloudFront requests by distribution chart");
+  // Renderer unit checks (pure functions, both themes)
+  const u = await p.evaluate(() => {
+    const B = window.BTW, P = B.PALETTES, res = {};
+    const grouped = { series: [{ name: "main", entity: "main", points: [[1, 1]] }, { name: "sibling", entity: "sibling", points: [[1, 2]] }, { name: "lab", entity: "lab", points: [[1, 3]] }] };
+    for (const th of ["dark", "light"]) {
+      const o = B.toOption({ type: "bar", series: [{ metric: "cf_requests", agg: "sum" }] }, grouped, { theme: th });
+      res[th] = o.series.map((x) => x.itemStyle.color);
+      res[th + "Pal"] = new Set(P[th]).size === P[th].length;
+      res[th + "Ink"] = o.textStyle.color;
+    }
+    // order-independent entity colours, health endpoint names map too
+    res.reordered = B.seriesColors([{ name: "lab" }, { name: "sibling /healthz" }, { name: "main /healthz" }, { name: "main /readyz (deep)" }], "dark");
+    // explicit spec colours win; a duplicated explicit colour (e.g. a grouped series) does not repeat
+    res.explicit = B.seriesColors([{ name: "a", color: "#123456" }, { name: "b", color: "#abcdef" }], "dark");
+    res.dup = B.seriesColors([{ name: "main", color: "#ff0000" }, { name: "sibling", color: "#ff0000" }, { name: "lab", color: "#ff0000" }], "dark");
+    res.many = B.seriesColors(Array.from({ length: 8 }, (_, i) => ({ name: "s" + i })), "dark");
+    res.pie = B.toOption({ type: "pie", series: [{ metric: "turns" }] }, { series: [{ name: "x", total: 1 }, { name: "y", total: 2 }, { name: "z", total: 3 }] }).series[0].data.map((d) => d.itemStyle.color);
+    return res;
+  });
+  const uniq = (a) => new Set(a).size === a.length;
+  must(u.dark.join() === "#56b4e9,#e69f00,#00c08b" && uniq(u.light) && u.light.join() === "#0072b2,#b87800,#009e73", "grouped series by distribution get 3 distinct stable colours on dark AND light themes");
+  must(u.darkPal && u.lightPal && u.darkInk !== u.lightInk, "both palettes have 8 distinct colours; text ink follows the theme");
+  must(u.reordered.join() === "#00c08b,#e69f00,#56b4e9,#cc79a7", "entity colours are stable regardless of order (lab, sibling, main, ready)");
+  must(u.explicit.join() === "#123456,#abcdef", "explicit distinct spec colours are honoured");
+  must(uniq(u.dup), "one explicit colour shared by several series does not paint them all the same (" + u.dup.join() + ")");
+  must(uniq(u.many), "8 un-coloured series get 8 distinct colours");
+  must(uniq(u.pie), "pie slices get distinct colours");
   // persistence: specs stored per login, without data
   const store = await p.evaluate(() => JSON.parse(localStorage.getItem("bt_widgets")));
   must(store.login === "dev-local" && Object.keys(store.widgets).length >= 10 && !JSON.stringify(store).includes('"points"'), "widget specs persisted per login in bt_widgets (specs only, no data)");

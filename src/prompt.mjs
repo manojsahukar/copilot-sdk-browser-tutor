@@ -28,6 +28,12 @@ Tools:
   inline, HttpOnly cookies, URL-scheme validation, Trusted Types) and tie it to gotcha "llm-js-xss". You may EXPLAIN how XSS and the
   defences work in general terms, but you must REFUSE to write or tailor working exploit payloads aimed at any real or third-party site;
   keep everything to this lab's harmless, pre-written demos and to defensive guidance.
+  The lab also has four focused lessons; pass lesson=<id> with demo="xss_lab" to get that lesson's notes and the user's runs of it:
+  lesson="links" for tricky links ("//evil", "/\\evil", javascript:, data:, spaces/control characters, open redirects, link filters);
+  lesson="hooks" for DOMPurify hooks / sanitiser config shared between scripts or widgets; lesson="csp3p" for CSP with third-party
+  embeds (Giscus, comments widgets, "refused to load", securitypolicyviolation, meta vs header CSP, frame-ancestors/report-uri); and
+  lesson="keystore" for where an API key / BYOK key should be stored in the browser (sessionStorage vs localStorage "remember me"),
+  tying it to gotcha "client-side-byok-key". Picking a lesson runs nothing: tell the user which preset to tap on the Demos page.
 Observability (this app is also a small preview of an observability agent; all of it is READ-ONLY):
 - check_health: "is it up?", availability, SLO/error budget, last outage. query_metrics: numbers for one allowlisted metric
   (infra via CloudWatch: Lambda invocations/duration/errors/throttles/concurrency, CloudFront requests/4xx/5xx/bytes/derived availability for

@@ -4,7 +4,41 @@
 (function () {
   "use strict";
   const KEY = "bt_widgets", TTL = 7 * 24 * 3600e3, MAX_WIDGETS = 16, MAX_VERSIONS = 10;
-  const PALETTE = ["#58a6ff", "#f78166", "#3fb950", "#d29922", "#bc8cff", "#ff7b72", "#79c0ff", "#56d364"];
+  // Colour-blind-safe series palette (Okabe–Ito hues), tuned per theme for contrast on the chart background.
+  // Order = assignment order; every hue is distinct for protan/deutan/tritan viewers in the first 6 slots.
+  const PALETTES = {
+    dark:  ["#56b4e9", "#e69f00", "#00c08b", "#cc79a7", "#f0e442", "#e8743b", "#a3b1bf", "#4c8fd6"],
+    light: ["#0072b2", "#b87800", "#009e73", "#b4568f", "#8a7d00", "#d55e00", "#5f6b76", "#3d5a99"],
+  };
+  // Stable colours for the app's own hosts, wherever they appear (CloudFront distributions, health endpoints):
+  // main = sky blue, sibling = orange, lab = bluish green, ready (deep main check) = reddish purple.
+  const ENTITY_SLOT = { main: 0, sibling: 1, lab: 2, ready: 3 };
+  const PALETTE = PALETTES.dark;
+  const themeOf = () => (document.documentElement.dataset.theme === "light" ? "light" : "dark");
+  // Map a series to its stable entity, from the server tag or (for older cached data) from its name.
+  function entityOf(x) {
+    if (x && x.entity && x.entity in ENTITY_SLOT) return x.entity;
+    const n = String((x && x.name) || "").toLowerCase();
+    if (/^main$|^main \/healthz|\(main\)$/.test(n)) return "main";
+    if (/readyz/.test(n)) return "ready";
+    if (/^sibling$|^sibling \/healthz|\(sibling\)$/.test(n)) return "sibling";
+    if (/^lab$|^xss-lab|\(lab\)$/.test(n)) return "lab";
+    return null;
+  }
+  // One colour per data series, no two alike: explicit spec colours win (first use), then stable entity colours,
+  // then the next unused palette colour. Only if a chart has more series than the palette do colours repeat.
+  function seriesColors(series, theme) {
+    const pal = PALETTES[theme] || PALETTES.dark, used = new Set(), out = new Array(series.length).fill(null);
+    series.forEach((x, i) => { const c = x && x.color && String(x.color).toLowerCase(); if (c && !used.has(c)) { out[i] = c; used.add(c); } });
+    series.forEach((x, i) => { if (out[i]) return; const e = entityOf(x); const c = e ? pal[ENTITY_SLOT[e]] : null; if (c && !used.has(c)) { out[i] = c; used.add(c); } });
+    let k = 0;
+    series.forEach((x, i) => {
+      if (out[i]) return;
+      while (k < pal.length && used.has(pal[k])) k++;
+      out[i] = k < pal.length ? pal[k] : pal[i % pal.length]; used.add(out[i]);
+    });
+    return out;
+  }
   const ECHARTS_SRC = "/static/vendor/echarts.custom.min.js?v=5.6.0";
   let login = null;
   let state = { widgets: {} }; // id -> { versions: [spec], pinned, board, data }
@@ -39,13 +73,15 @@
 
   // ---------- pure: clean spec + data -> ECharts option (exported for tests) ----------
   const fmtUnit = (u) => (u === "count" ? "" : u);
-  function toOption(spec, data) {
-    const colors = spec.series.map((s, i) => s.color || PALETTE[i % PALETTE.length]);
-    const base = { animationDuration: 300, color: [...colors, ...PALETTE], textStyle: { color: "#c9d1d9", fontSize: 11 }, backgroundColor: "transparent" };
+  function toOption(spec, data, opts) {
+    const theme = (opts && opts.theme) || "dark";
     const series = data.series || [];
+    const colors = seriesColors(series, theme);
+    const ink = theme === "light" ? "#24292f" : "#c9d1d9";
+    const base = { animationDuration: 300, color: [...colors, ...PALETTES[theme]], textStyle: { color: ink, fontSize: 11 }, backgroundColor: "transparent" };
     if (spec.type === "pie") {
-      return { ...base, tooltip: { trigger: "item", renderMode: "richText" }, legend: { bottom: 0, textStyle: { color: "#c9d1d9" }, type: "scroll" },
-        series: [{ type: "pie", radius: ["35%", "65%"], center: ["50%", "45%"], label: { color: "#c9d1d9" }, data: series.map((x) => ({ name: x.name, value: x.total == null ? 0 : x.total })) }] };
+      return { ...base, tooltip: { trigger: "item", renderMode: "richText" }, legend: { bottom: 0, textStyle: { color: ink }, type: "scroll" },
+        series: [{ type: "pie", radius: ["35%", "65%"], center: ["50%", "45%"], label: { color: ink }, data: series.map((x, i) => ({ name: x.name, value: x.total == null ? 0 : x.total, itemStyle: { color: colors[i] } })) }] };
     }
     const right = series.some((x) => x.axis === "right");
     const ax = spec.axes || {};
@@ -55,13 +91,13 @@
     let yMin = ax.y_min, yMax = ax.y_max;
     if (unitL === "%" && yMax == null && leftVals.every((v) => v <= 100)) yMax = 100;
     if (unitL === "%" && spec.slo != null && yMin == null) yMin = Math.max(0, Math.floor(Math.min(spec.slo, ...leftVals) - 1));
-    const yAxis = [{ type: "value", name: ax.y_label || fmtUnit(unitL) || "", min: yMin, max: yMax, nameTextStyle: { color: "#8b949e" }, splitLine: { lineStyle: { color: "#21262d" } }, axisLabel: { color: "#8b949e" }, scale: yMin == null }];
+    const yAxis = [{ type: "value", name: ax.y_label || fmtUnit(unitL) || "", min: yMin, max: yMax, nameTextStyle: { color: "#8b949e" }, splitLine: { lineStyle: { color: theme === "light" ? "#d0d7de" : "#21262d" } }, axisLabel: { color: "#8b949e" }, scale: yMin == null }];
     if (right) yAxis.push({ type: "value", name: ax.right_label || fmtUnit(unitR) || "", nameTextStyle: { color: "#8b949e" }, splitLine: { show: false }, axisLabel: { color: "#8b949e" }, scale: true });
     const kind = spec.type === "bar" || spec.type === "stacked" ? "bar" : "line";
     const out = series.map((x, i) => ({
       type: kind, name: x.name, yAxisIndex: right && x.axis === "right" ? 1 : 0, data: x.points, showSymbol: x.points.filter((p) => p[1] != null).length < 30,
       connectNulls: false, smooth: false, ...(spec.type === "area" ? { areaStyle: { opacity: 0.18 } } : {}), ...(spec.type === "stacked" ? { stack: "total" } : {}),
-      ...(x.color ? { itemStyle: { color: x.color }, lineStyle: { color: x.color } } : {}),
+      itemStyle: { color: colors[i] }, lineStyle: { color: colors[i] },   // every series pinned to its own distinct colour
     }));
     // thresholds / SLO as dashed horizontal markLines on the first series of their axis
     const th = [...(spec.thresholds || [])]; if (spec.slo != null && !th.some((t) => t.value === spec.slo)) th.push({ value: spec.slo, label: `SLO ${spec.slo}%` });
@@ -72,8 +108,8 @@
       out[idx].markLine.data.push({ yAxis: t.value, name: t.label || String(t.value), lineStyle: { type: "dashed", color: t.color || "#f85149", width: 1.5 }, label: { formatter: "{b}", color: t.color || "#f85149", position: "insideEndTop" } });
     });
     return { ...base, grid: { left: 44, right: right ? 44 : 14, top: 28, bottom: series.length > 1 ? 44 : 24, containLabel: false },
-      tooltip: { trigger: "axis", renderMode: "richText" }, legend: series.length > 1 ? { bottom: 0, type: "scroll", textStyle: { color: "#c9d1d9" } } : undefined,
-      xAxis: { type: "time", min: data.from, max: data.to, axisLabel: { color: "#8b949e", hideOverlap: true }, axisLine: { lineStyle: { color: "#30363d" } } }, yAxis, series: out };
+      tooltip: { trigger: "axis", renderMode: "richText" }, legend: series.length > 1 ? { bottom: 0, type: "scroll", textStyle: { color: ink } } : undefined,
+      xAxis: { type: "time", min: data.from, max: data.to, axisLabel: { color: "#8b949e", hideOverlap: true }, axisLine: { lineStyle: { color: theme === "light" ? "#afb8c1" : "#30363d" } } }, yAxis, series: out };
   }
 
   // ---------- DOM helpers (textContent only) ----------
@@ -159,7 +195,7 @@
     if (!(data.series || []).some((x) => x.points && x.points.some((p) => p[1] != null)) && spec.type !== "pie") { box.remove(); body.append(el("div", "w-empty", "No data points in this range yet.")); return; }
     const ec = await echartsReady();
     const chart = ec.init(box, null, { renderer: "canvas" });
-    chart.setOption(toOption(spec, data));
+    chart.setOption(toOption(spec, data, { theme: themeOf() }));
     const ro = new ResizeObserver(() => chart.resize()); ro.observe(box);
     box._chart = chart; box._ro = ro;
   }
@@ -316,7 +352,7 @@
   window.BTW = {
     init(l) { load(l); renderBoards(); beacon(); },
     list: () => Object.keys(state.widgets).map(latest).filter(Boolean),
-    apply, attach, openHealth, openMetrics, refreshBoard, toOption, latest,
+    apply, attach, openHealth, openMetrics, refreshBoard, toOption, latest, seriesColors, PALETTES,
     clear() { try { localStorage.removeItem(KEY); } catch {} state = { widgets: {} }; },
     _state: () => state,
   };

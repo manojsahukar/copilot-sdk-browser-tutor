@@ -128,6 +128,10 @@
       ["stored", "vuln", "Stored (vuln)"], ["dom", "vuln", "DOM (vuln)"],
       ["capabilities", "vuln", "What script can do"], ["defences", "x", "Defences"],
       ["prompt", "vuln", "Prompt-inj (naive)"], ["prompt", "fixed", "Prompt-inj (safe)"],
+      ["links", "vuln", "Sneaky links (naive)"], ["links", "fixed", "Sneaky links (strict)"],
+      ["hooks", "vuln", "Shared hooks (leak)"], ["hooks", "fixed", "Shared hooks (private)"],
+      ["csp3p", "vuln", "CSP vs Giscus (blocked)"], ["csp3p", "fixed", "CSP vs Giscus (allowed)"],
+      ["keystore", "inject", "Where keys live"],
     ].map(([dm, v, l]) => `<button class="lab-preset" data-lab-demo="${dm}" data-lab-variant="${v}">${esc(l)}</button>`).join("");
     return `<details class="card demo" open>
       <summary><span class="gt-title">${esc(d.title)}</span><span class="badge build">contained · own origin</span></summary>

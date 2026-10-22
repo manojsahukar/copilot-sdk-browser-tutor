@@ -2,6 +2,31 @@
 // Each entry is metadata (what runs, what a site learns, how to revoke). Live demos run as STATIC client code
 // in /static/demos.js; only metadata ever comes back to the tutor via run_demo.
 export const DEMO_IDS = ["storage_inspector", "xss_lab", "camera", "microphone", "geolocation", "cookie_jar", "cross_site_fetch"];
+// Sub-lessons inside the xss_lab (run_demo {demo:"xss_lab", lesson}). Names only: each maps to static, reviewed lab code
+// that runs ONLY when the user taps a preset; the model never supplies code and picking a lesson runs nothing.
+export const LAB_LESSONS = ["reflected", "stored", "dom", "capabilities", "defences", "prompt", "links", "hooks", "csp3p", "keystore"];
+export const LAB_LESSON_INFO = {
+  links: {
+    title: "Sneaky links: naive relative-link check vs a strict filter", presets: ["Sneaky links (naive)", "Sneaky links (strict)"],
+    teaches: "A rule like 'keep it if it starts with / or http' looks safe but '//evil.example' is protocol-relative and '/\\evil.example' is treated by browsers as '//evil.example', so both navigate OFF-site. javascript: and data: schemes run script or load attacker documents, and browsers strip leading spaces and tabs/newlines inside the scheme ('java\\tscript:'), so string checks must reject control/whitespace characters and backslashes outright. The strict filter (safeHref) allows only a same-site path starting with a single '/' (not '//' or '/\\') or an absolute http(s) URL with a host. The lab shows each link's resolved destination (new URL(href, page)) without navigating.",
+    gotchas: ["llm-js-xss"],
+  },
+  hooks: {
+    title: "Shared sanitiser hooks leaking between scripts", presets: ["Shared hooks (leak)", "Shared hooks (private)"],
+    teaches: "DOMPurify hooks are registered on an INSTANCE. The default export is one global instance shared by every script on the page, so one script's permissive hook (e.g. force-keeping onerror for its own images) silently applies to another script's sanitize() call and lets <img onerror> through. Fix: create a private instance with DOMPurify(window) for anything that needs hooks, or add the hook immediately before your own sanitize() and remove it (removeHook/removeAllHooks) in a finally block.",
+    gotchas: ["llm-js-xss"],
+  },
+  csp3p: {
+    title: "CSP with third parties (a Giscus-style comments embed)", presets: ["CSP vs Giscus (blocked)", "CSP vs Giscus (allowed)"],
+    teaches: "A strict CSP blocks every third-party load you forgot to list: Giscus needs its script (script-src https://giscus.app), its stylesheet (style-src https://giscus.app) and its iframe (frame-src https://giscus.app). Each refused load fires a securitypolicyviolation event (and a report if the HEADER policy has report-to/report-uri) before any request is made. Recommended host policy: default-src 'self'; script-src 'self' https://giscus.app; style-src 'self' https://giscus.app; img-src 'self' data:; font-src 'self'; connect-src 'self' https://openrouter.ai; frame-src https://giscus.app; object-src 'none'; base-uri 'self'; form-action 'self'. A <meta http-equiv> CSP cannot set frame-ancestors, report-uri/report-to or sandbox; use a real response header for those.",
+    gotchas: ["xss-lab-isolation"],
+  },
+  keystore: {
+    title: "Where your API key lives: sessionStorage vs 7-day localStorage", presets: ["Where keys live"],
+    teaches: "Both sessionStorage and localStorage are readable by ANY script on the origin (neither is HttpOnly), so one XSS steals a bring-your-own key from either. The difference is lifetime: sessionStorage is per-tab and gone when the tab closes (a new tab starts empty); a 7-day 'remember me' in localStorage survives tab closes and restarts, so the exposure window is a week. The lab stores a DUMMY 'sk-or-v1-LABDUMMY-…' key both ways, fires an injected preset that reads both, and simulates a new tab. Real keys belong server-side; if client-side, keep them tab-only and minimise script on that origin.",
+    gotchas: ["client-side-byok-key"],
+  },
+};
 export const DEMOS = {
   storage_inspector: {
     id: "storage_inspector", title: "What this site stores in YOUR browser", needsPermission: false,
@@ -13,7 +38,7 @@ export const DEMOS = {
   },
   xss_lab: {
     id: "xss_lab", title: "Script injection lab (contained XSS)", needsPermission: false,
-    what: "A deliberately vulnerable mini-site, embedded in an iframe, that lets you fire harmless cross-site-scripting (XSS) payloads and watch them execute \u2014 then see the same payloads neutralised by the safe pattern. Covers reflected, stored and DOM-based XSS, what injected script can do (read the JS-visible cookie, read localStorage, draw a fake login, log keystrokes, 'exfiltrate'), defences (strict CSP with securitypolicyviolation events, HttpOnly, DOMPurify, Trusted Types), and prompt-injection-to-XSS through the app's real marked+DOMPurify pipeline.",
+    what: "A deliberately vulnerable mini-site, embedded in an iframe, that lets you fire harmless cross-site-scripting (XSS) payloads and watch them execute \u2014 then see the same payloads neutralised by the safe pattern. Covers reflected, stored and DOM-based XSS, what injected script can do (read the JS-visible cookie, read localStorage, draw a fake login, log keystrokes, 'exfiltrate'), defences (strict CSP with securitypolicyviolation events, HttpOnly, DOMPurify, Trusted Types), and prompt-injection-to-XSS through the app's real marked+DOMPurify pipeline. Four further lessons: sneaky links ('//' and '/\\' tricks vs a strict link filter), shared sanitiser hooks (one script's DOMPurify hook leaking into another's), CSP with third parties (a Giscus-style embed blocked vs allowed, with securitypolicyviolation events), and where a bring-your-own API key lives (sessionStorage vs a 7-day localStorage remember, with a dummy key).",
     siteLearns: "Nothing about you \u2014 every value is dummy. The lesson is how an XSS bug turns 'just text' into attacker code running in a page's origin, and why each defence stops it.",
     localOnly: "The lab runs on its OWN throwaway origin (never the main site), is only usable when framed by the tutor, ignores anything in the URL (no shareable attack links), sets only labelled host-only dummy cookies, and can only 'exfiltrate' to its own echo endpoint. The tutor receives metadata only: which payload ran, whether it executed or was blocked, and which defence stopped it.",
     teaches: "Isolation is the whole point: a vulnerable page must live on a dedicated origin with its own headers, the main session cookie must be host-only so it never reaches the lab, payloads must never come from the URL, the lab must only run when framed by the trusted app, and 'exfiltration' must be boxed in. Compare the vulnerable innerHTML/javascript: sinks with textContent, scheme validation, strict CSP, HttpOnly and DOMPurify.",

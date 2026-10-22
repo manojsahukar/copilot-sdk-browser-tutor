@@ -184,6 +184,9 @@ const DEMO_CHIP = {
   cross_site_fetch: "What is a cross-site request?",
 };
 const STARTERS = ["What does my browser reveal?", "How does XSS get blocked here?", "How unique am I?", "What are Agent SDK gotchas?"];
+// One rotating chip per turn for the script-injection lab's four lessons (links, hooks, csp3p, keystore).
+const XSS_CHIPS = ["How could a link starting with // trick a site?", "Can one script's sanitiser hook leak into another?",
+  "How does CSP block a third-party embed?", "Where should a chat API key be stored?"];
 // Widget chips: these make the agent draw or edit a live chart in the chat. Shown with a 📊 badge (CSS span, text only).
 const OBS_CHIPS = ["Is the site up?", "Plot my reply latency over time", "Show errors last 24h", "Availability last week?", "Why was it slow?"];
 const WIDGET_EDIT_CHIPS = ["Switch to bar by model", "Add a 1s threshold line", "Change to last 7 days", "Compare with 429s"];
@@ -198,7 +201,10 @@ function curatedChips() {
   const k = (chatHistory.length / 2) % OBS_CHIPS.length;
   const obs = OBS_CHIPS.slice(k).concat(OBS_CHIPS.slice(0, k));                    // rotate, keep all 5 widget chips reachable
   // Mix: widget chips first (the showcase), interleaved with privacy / XSS / demo chips; one scrollable row on mobile.
-  const other = [STARTERS[0], STARTERS[1], ...notRun.slice(0, 1), STARTERS[2]];
+  const turn = Math.floor(chatHistory.length / 2);
+  const lesson = XSS_CHIPS[Math.floor(turn / 2) % XSS_CHIPS.length];
+  // Slot 3 alternates by turn: an XSS-lab lesson chip, then a not-yet-run demo chip (falls back to a lesson chip).
+  const other = [STARTERS[0], STARTERS[1], (turn % 2 === 0 || !notRun.length) ? lesson : notRun[0], STARTERS[2]];
   const mix = [obs[0], obs[1], other[0], obs[2], other[1], obs[3], other[2], obs[4], other[3]];
   for (const c of mix) if (c && !out.includes(c)) out.push(c);
   return out.slice(0, 8);
