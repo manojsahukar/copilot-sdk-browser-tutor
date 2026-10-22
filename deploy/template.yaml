@@ -32,6 +32,12 @@ Parameters:
   CookieDomain: { Type: String, Default: "", Description: "Parent domain shared by both sites, e.g. example.com, for the cross-site cookie demo" }
   LabDomainName: { Type: String, Default: "", Description: "Isolated XSS-lab origin, e.g. xss-lab.example.com" }
   LabCertificateArn: { Type: String, Default: "", Description: "ACM cert in us-east-1 for LabDomainName" }
+  # Observability: CloudFront distribution ids can't be !Ref'd from the function (Function -> Distribution -> FunctionUrl
+  # -> Function would be a cycle), so deploy.sh looks them up from this stack and passes them in.
+  MainDistributionId: { Type: String, Default: "" }
+  SiblingDistributionId: { Type: String, Default: "" }
+  LabDistributionId: { Type: String, Default: "" }
+  ObsAdminLogins: { Type: String, Default: "", Description: "GitHub logins allowed to see site-wide row-level logs (masked)" }
 
 Conditions:
   HasBaseUrl: !Not [!Equals [!Ref BaseUrl, ""]]
@@ -78,9 +84,37 @@ Resources:
           COOKIE_DOMAIN: !Ref CookieDomain
           LAB_HOST: !If [HasLab, !Ref LabDomainName, ""]
           LAB_URL: !If [HasLab, !Sub "https://${LabDomainName}", ""]
+          METRICS_TABLE: !Ref MetricsTable
+          METRICS_FUNCTION_NAME: browser-tutor
+          METRICS_LOG_GROUP: /aws/lambda/browser-tutor
+          CF_DIST_MAIN: !Ref MainDistributionId
+          CF_DIST_SIBLING: !Ref SiblingDistributionId
+          CF_DIST_LAB: !Ref LabDistributionId
+          OBS_ADMIN_LOGINS: !Ref ObsAdminLogins
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref GitHubOAuthSecretArn
+        # ---- Observability: READ-ONLY (plus PutItem for the app's own minimised telemetry). No write/describe on anything else. ----
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: TelemetryTableOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:Query]
+              Resource: !GetAtt MetricsTable.Arn
+            - Sid: ReadMetricsNoResourceLevelSupport   # GetMetricData can't be scoped to metrics; the app's fixed catalogue picks namespace/dimensions
+              Effect: Allow
+              Action: cloudwatch:GetMetricData
+              Resource: "*"
+            - Sid: LogsInsightsOwnLogGroupOnly    # queries can only START against the tutor's own log group
+              Effect: Allow
+              Action: logs:StartQuery
+              Resource:
+                - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/browser-tutor
+                - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/browser-tutor:*
+            - Sid: LogsQueryResultsByIdNoResourceLevelSupport  # acts on a queryId, which only the scoped StartQuery yields
+              Effect: Allow
+              Action: logs:GetQueryResults
+              Resource: "*"
       FunctionUrlConfig:
         AuthType: NONE
         InvokeMode: RESPONSE_STREAM
@@ -89,6 +123,60 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /aws/lambda/browser-tutor
+      RetentionInDays: 7
+
+  # Telemetry + health history. On-demand (no idle cost), TTL deletes rows after 30-35 days (free), AWS-owned encryption (free).
+  MetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: browser-tutor-metrics
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
+
+  # Availability pinger: EventBridge schedule (free) -> tiny arm64 Lambda every 5 min -> one row in MetricsTable.
+  PingerFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasDomain
+    Properties:
+      FunctionName: browser-tutor-pinger
+      CodeUri: pinger/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 25
+      Environment:
+        Variables:
+          METRICS_TABLE: !Ref MetricsTable
+          TARGETS: !Sub
+            - '{"main":"https://${DomainName}/healthz","ready":"https://${DomainName}/readyz"${Sib}${Lab}}'
+            - Sib: !If [HasSibling, !Sub ',"sibling":"https://${SiblingDomainName}/healthz"', ""]
+              Lab: !If [HasLab, !Sub ',"lab":"https://${LabDomainName}/healthz"', ""]
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: WriteProbeRowsOnly
+              Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt MetricsTable.Arn
+      Events:
+        Every5Min:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Description: Browser Tutor availability probe
+
+  PingerLogs:
+    Type: AWS::Logs::LogGroup
+    Condition: HasDomain
+    Properties:
+      LogGroupName: /aws/lambda/browser-tutor-pinger
       RetentionInDays: 7
 
   # ---------- Shared CloudFront bits ----------
@@ -300,6 +388,8 @@ Resources:
       AliasTarget: { DNSName: !GetAtt LabDistribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 }
 
 Outputs:
+  MetricsTableName:
+    Value: !Ref MetricsTable
   FunctionUrl:
     Value: !GetAtt TutorFunctionUrl.FunctionUrl
   OAuthCallbackUrl:

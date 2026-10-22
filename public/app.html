@@ -8,6 +8,8 @@
   <nav class="tabs" role="tablist">
     <button data-tab="probe" class="tab active" role="tab" aria-selected="true">Probe</button>
     <button data-tab="chat" class="tab" role="tab" aria-selected="false">Ask tutor</button>
+    <button data-tab="health" class="tab" role="tab" aria-selected="false">Health</button>
+    <button data-tab="metrics" class="tab" role="tab" aria-selected="false">Metrics</button>
     <a class="tab" href="/demos">Live demos</a><a class="tab" href="/gotchas">SDK gotchas</a><a class="tab" href="/widget/">Widget demo</a>
   </nav>
   <div class="who"><span id="me"></span><button id="logout" class="link">Sign out</button></div>
@@ -37,6 +39,19 @@
     <form id="form"><textarea id="q" rows="1" autocomplete="off" enterkeyhint="send" placeholder="Ask about your browser…" maxlength="4000" aria-label="Message"></textarea><button class="btn" id="sendBtn">Send</button></form>
   </div>
 </section>
+<section id="health" class="panel board" hidden>
+  <div class="board-head"><h2>Health &amp; availability</h2><button class="link" data-refresh="health" type="button">⟳ Refresh</button></div>
+  <p class="muted board-lead">Probed every 5 min from outside (DNS → TLS → CloudFront → app). Uptime and incidents fill in as history accrues; CloudFront-derived availability has real history already. Ask the tutor to change any widget.</p>
+  <div class="board-asks"><button class="chip" type="button" data-ask="Is the site up right now?">Is it up?</button><button class="chip" type="button" data-ask="What was availability last week, and when was the last outage?">Last week?</button><button class="chip" type="button" data-ask="Why was it slow recently? Correlate latency, 429s and errors.">Why slow?</button></div>
+  <div id="healthBoard" class="wboard"></div>
+</section>
+<section id="metrics" class="panel board" hidden>
+  <div class="board-head"><h2>Metrics</h2><button class="link" data-refresh="metrics" type="button">⟳ Refresh</button></div>
+  <p class="muted board-lead">Pinned widgets (📍 on any chart). Infrastructure metrics are site-wide; your chat telemetry is only yours.</p>
+  <div id="metricPresets" class="chiprow wrap" aria-label="Add a widget"></div>
+  <p id="metricsEmpty" class="muted">Nothing pinned yet: add one above or ask the tutor to plot something.</p>
+  <div id="metricsBoard" class="wboard"></div>
+</section>
 </main>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
@@ -50,5 +65,5 @@
 
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/purify.min.js"></script>
-<script src="/static/render.js"></script><script src="/static/probe.js"></script><script src="/static/chat.js"></script>
+<script src="/static/widgets.js"></script><script src="/static/render.js"></script><script src="/static/probe.js"></script><script src="/static/chat.js"></script>
 </body></html>

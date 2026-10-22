@@ -73,7 +73,7 @@ Browser ──HTTPS──> CloudFront ──(X-Origin-Verify secret header)─�
 ## Security notes
 
 This project is itself a worked example of building an agent safely. The **[`/gotchas`](https://copilot-sdk.demo.curiosta.com/gotchas)**
-page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 17 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
+page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 22 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
 Accepted / Needs human) and a pointer to the code that handles each. Highlights:
 
 - **No model-generated JavaScript.** The model only returns text; live demos use a `run_demo` **enum** that maps a demo *name*
@@ -157,6 +157,86 @@ The script is dependency-free (plain Node), so no extra `npm install` is needed.
       content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; base-uri 'none'; form-action 'none'">
 ```
 
+## Observability PoC: agent-editable widgets, metrics, logs and health
+
+A proof of concept for an **Observability Agent**. The tutor can **draw and edit live charts in the chat**, answer
+"is it up? / availability last week? / last outage? / why was it slow?" with an **evidence-based RCA** that cites the series and log
+query it used, and there are compact, mobile-first **Health** and **Metrics** tabs. Everything is **read-only**.
+
+| Health (mobile) | Metrics (mobile) | Agent edit: before → after |
+|---|---|---|
+| ![health](docs/widgets-health-mobile.png) | ![metrics](docs/widgets-metrics-mobile.png) | ![before](docs/widgets-agent-before-mobile.png) ![after](docs/widgets-agent-after-mobile.png) |
+
+**Widgets are specs, not code.** The model never writes JS, HTML or chart config. It calls `render_widget` / `update_widget` with a
+small declarative spec (`type`, up to 4 `series` of catalogue metrics, `range`, `interval`, `group_by`, `filters`, `axes`,
+up to 3 `thresholds`, `slo`, `scope`). The server validates it against a JSON Schema (`src/widgets.mjs`). The schema has
+`additionalProperties:false` everywhere, enums for every metric/agg/range, plain-text-only labels (no `<>`, URLs, `javascript:`,
+template syntax or control chars), a 4 KB spec cap and a 500-point cap. Then it **rebuilds** the spec from known fields only and resolves the data server-side.
+The client (`public/widgets.js`) maps the spec onto chart options with a pure function. Edits re-render the *same* card in place
+(`v2`, `v3` …) with **undo** (≤10 versions). Specs (never data) persist per login in `localStorage` as `bt_widgets` (≤16 widgets, 7-day
+expiry, wiped by *Clear site data*), alongside `bt_chat`.
+
+**Chart library: Apache ECharts 5.6 (Apache-2.0)**, as a custom tree-shaken build (`scripts/build-echarts.sh`, line/bar/pie +
+markLine, canvas renderer, ~181 KB gzip). It is vendored, self-hosted and **lazy-loaded** only when the first chart renders. It works under the app's
+strict CSP (`script-src 'self'`, no `unsafe-eval`). The build fails if `eval`/`new Function` appears (the only one in ECharts is
+the GeoJSON loader, which is excluded), and tooltips use `richText` so no HTML is injected. Vega-Lite was rejected: its expression
+language needs `eval` or a separate interpreter.
+
+**Agent tools (all on the deny-by-default allow-list):**
+
+| Tool | What it does |
+|---|---|
+| `query_metrics` | numbers + summary for catalogue metrics (no drawing) |
+| `render_widget` / `update_widget` | draw / edit-in-place a validated widget |
+| `query_logs` | **CloudWatch Logs Insights** over the tutor's own log group, **allowlisted templates only** (`errors_by_type`, `error_timeline`, `rate_limits`, `slow_turns`, `lambda_reports`, `recent_errors`). Time-boxed (20 s), row-capped (≤50), every row masked (tokens, emails, IPs, long blobs) |
+| `check_health` | live readiness + probe status, uptime, SLO/error budget, cert days, incidents |
+
+**Metric catalogue** (fixed server-side; the model picks names, never namespaces/dimensions):
+- **CloudWatch (first-class):** Lambda invocations, duration p50/p95/p99, errors, throttles, concurrent executions; CloudFront
+  requests, 4xx/5xx rate, bytes downloaded and **derived availability** (100 − 5xx %) for the main, sibling and xss-lab distributions.
+- **Health:** probe uptime %, probe latency, cert days (from the scheduled pinger).
+- **Secondary:** per-user turn telemetry (reply latency, time-to-first-token, tool calls, 429 retries, errors, tokens by model/engine) and
+  browser RUM (TTFB, LCP, CLS, load, RTT). Users only see **their own** rows; site-wide app aggregates are user-less.
+- `example_data:true` renders clearly badged **EXAMPLE DATA** (never mixed with real series). Thin history is labelled on the card.
+
+**Health & availability.** `/healthz` = liveness. `/readyz` = deep but **cached** readiness: Secrets Manager reachable (10 min),
+Copilot runtime present, OpenRouter reachable (2 min), DNS + TLS cert days for the main/sibling/xss-lab hosts (1 h). It returns only
+`ok/degraded/down` + latencies (no secrets, no error text), returns 503 when down, and is safe unauthenticated. An **EventBridge-scheduled Lambda pinger**
+(`deploy/pinger/`, every 5 min, arm64/128 MB) probes each endpoint **from outside, through CloudFront**, and stores status, latency, HTTP code
+and cert days in DynamoDB (35-day TTL). The Health tab shows status tiles, 24h/7d/30d uptime vs a **99.5 % SLO with error budget left**,
+response-time trend, an incident timeline and cert days. Until probe history accrues it shows **real CloudFront-derived availability**
+(labelled *derived*).
+
+**IAM added (least privilege, read-only for the app):**
+
+```yaml
+- Sid: TelemetryTableOnly                 # own metrics table only
+  Effect: Allow
+  Action: [dynamodb:PutItem, dynamodb:Query]
+  Resource: <MetricsTable ARN>
+- Sid: ReadMetricsNoResourceLevelSupport  # GetMetricData has no resource-level scoping; the catalogue is fixed server-side
+  Effect: Allow
+  Action: [cloudwatch:GetMetricData]
+  Resource: "*"
+- Sid: LogsInsightsOwnLogGroupOnly        # queries can only START on the tutor's own log group
+  Effect: Allow
+  Action: [logs:StartQuery]
+  Resource: [arn:aws:logs:<region>:<acct>:log-group:/aws/lambda/browser-tutor, …:*]
+- Sid: LogsQueryResultsByIdNoResourceLevelSupport  # acts on a queryId that only the scoped StartQuery yields
+  Effect: Allow
+  Action: [logs:GetQueryResults]
+  Resource: "*"
+# Pinger function: dynamodb:PutItem on the MetricsTable only.
+```
+
+There is no write access to CloudWatch or Logs, no `secretsmanager:Describe*`/`List*`, and no `logs:StopQuery`/`DescribeLogGroups`. Every tool call is
+audit-logged as a JSON line (`{"bt":"audit",…}`, pseudonymous user hash, no prompt text). Admins (`OBS_ADMIN_LOGINS`) may run row-level
+log templates site-wide; everyone else is forced to their own rows.
+
+**Cost delta (monthly, this traffic level):** DynamoDB on-demand + TTL ≈ $0.01; pinger ≈ 8.6k invocations × 128 MB, which fits in the Lambda free tier
+(≈ $0.00, ≤ $0.05 without it); the EventBridge schedule is free; GetMetricData $0.01/1k metrics with 60 s caching ≈ cents; Logs Insights $0.005/GB
+scanned on a 7-day-retention group ≈ <$0.01. **No Route 53 health checks ($0.50–0.75 each), no Synthetics (~$10/month), no alarms.**
+
 ## Run locally
 
 ```bash
@@ -185,6 +265,8 @@ node scripts/widget-unit.mjs       # client-side widget: PKCE S256, BM25 retriev
 node scripts/widget-e2e.mjs        # widget pilot: real-touch mobile open/close/reopen (backdrop, Android back), no overflow, 44px targets, pre-connect prompt; mocked connect -> chat (cited) -> disconnect
 node scripts/widget-oauth-e2e.mjs       # OAuth return in a NEW tab completes; state mismatch / missing / expired / denied all shown; /widget + /widget/index.html; debug trace never leaks; remember opt-in; REAL bogus-code error surfaced
 node scripts/widget-openrouter-live.mjs  # widget against the REAL OpenRouter (no key): auth/keys dummy -> readable 400, chat bogus key -> readable 401, CORS/CSP ok (errors surface, not silent)
+node scripts/widgets-unit.mjs      # widget spec schema (unknown keys, script/URL text, oversize, __proto__), point caps, catalogue, log-template scoping/masking, health maths, per-user isolation
+node scripts/widgets-e2e.mjs       # Health + Metrics boards mobile/desktop: zero CSP violations, lazy chart load, update-in-place + undo, persistence (--agent: REAL agent render→edit screenshots)
 node scripts/e2e-mobile.mjs        # responsive checks at 360/390/768/1280 (needs: npm i --no-save puppeteer-core@23)
 ```
 
@@ -214,14 +296,31 @@ All config is parameterised — nothing in this repo is tied to a specific AWS a
 Teardown: `sam delete --stack-name browser-tutor --region "$AWS_REGION"`. See `docs/HOSTING.md` for the cost notes
 (designed to sit within a few dollars/month; a `$5/month` budget alert is recommended).
 
+## Out-of-stack dependencies
+
+Everything the app runs on is in `deploy/template.yaml` (stack `browser-tutor`), **except** these, which the stack only
+*references*. They must exist before a deploy and are not created, changed or deleted by `deploy.sh` or `sam delete`:
+
+| Dependency | Where | Owner | How the stack uses it |
+|---|---|---|---|
+| **Route 53 hosted zone** for the demo domain | Route 53 (global), id passed as `HostedZoneId` | account owner | **Referenced, not created.** The stack adds alias records for the main, sibling and xss-lab hostnames into it. |
+| **ACM certificates stack** `browser-tutor-cert` (`deploy/cert-template.yaml`) | **us-east-1** (CloudFront requires it) | account owner | A separate stack; its certificate ARNs are passed as `CertificateArn` / `SiblingCertificateArn` / `LabCertificateArn`. DNS-validated in the zone above. |
+| **Secrets Manager secret** `browser-tutor/github-oauth` | stack region | account owner | ARN passed as `GitHubOAuthSecretArn`; JSON with `client_id`, `client_secret`, `session_secret`, `origin_verify`. The app role only has `secretsmanager:GetSecretValue` on this one ARN. |
+| **GitHub OAuth app** | github.com | **GitHub Admin** | Provides `client_id` / `client_secret`. Its callback must be `https://<your-domain>/auth/callback`. |
+| SAM managed artifact bucket | stack region | SAM CLI (`--resolve-s3`) | Holds uploaded code zips only. |
+
+Account-specific values (account id `<ACCOUNT_ID>`, zone id `<HOSTED_ZONE_ID>`, secret ARN
+`arn:aws:secretsmanager:<region>:<ACCOUNT_ID>:secret:browser-tutor/github-oauth-<suffix>`, distribution ids) live only in the
+gitignored `.deploy-secrets` or are looked up at deploy time. They are never committed.
+
 ## Project layout
 
 ```
 src/        server.mjs (routing, OAuth, sessions, origin lockdown, chat SSE), agent.mjs (SDK wiring, tools,
-            refresh, sanitation), openrouter.mjs (OAuth PKCE + BYOK provider), appsecrets.mjs, serverview.mjs, prompt.mjs, gotchas.mjs, demos.mjs
+            refresh, sanitation, observability tools), widgets.mjs (spec schema), metrics.mjs (catalogue, CloudWatch/Logs/DynamoDB), health.mjs (/readyz), scrub.mjs, openrouter.mjs (OAuth PKCE + BYOK provider), appsecrets.mjs, serverview.mjs, prompt.mjs, gotchas.mjs, demos.mjs
 public/     static UI (index/app/demos/gotchas .html, probe.js, demos.js, chat.js, render.js, style.css)
             widget.js + widget.css + widget/ (client-side OpenRouter chat widget pilot, site-index.json)
-deploy/     template.yaml (SAM), cert-template.yaml, build.sh, deploy.sh, run.sh
+deploy/     template.yaml (SAM, incl. metrics table + pinger), pinger/, cert-template.yaml, build.sh, deploy.sh, run.sh
 scripts/    unit-tests, injection-tests, e2e-*
 docs/       HOSTING.md, RESEARCH.md, screenshots
 ```

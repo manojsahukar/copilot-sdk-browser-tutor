@@ -13,13 +13,14 @@ ok("copilot-cli mode is rejected", () => assert.throws(() => clientOptions({ mod
 ok("default/undefined mode is rejected", () => assert.throws(() => clientOptions({ baseDirectory: "/tmp/x" })));
 
 console.log("gotcha 7: permission handler denies by default");
-for (const t of ["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo", "suggest_followups"])
+for (const t of ["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo", "suggest_followups", "query_metrics", "render_widget", "update_widget", "query_logs", "check_health"])
   ok(`allows custom tool ${t}`, () => assert.equal(permissionDecision({ kind: "custom-tool", toolName: t }).kind, "approve-once"));
 ok("rejects unknown custom tool", () => assert.equal(permissionDecision({ kind: "custom-tool", toolName: "exec_shell" }).kind, "reject"));
 ok("rejects shell kind", () => assert.equal(permissionDecision({ kind: "shell", toolName: "bash" }).kind, "reject"));
 ok("rejects write kind", () => assert.equal(permissionDecision({ kind: "write", toolName: "write_file" }).kind, "reject"));
 ok("rejects empty request", () => assert.equal(permissionDecision(undefined).kind, "reject"));
-ok("allowlist has exactly 5 tools", () => assert.equal(ALLOWED_TOOLS.size, 5));
+ok("allowlist has exactly 10 tools (5 tutor + 5 read-only observability)", () => assert.equal(ALLOWED_TOOLS.size, 10));
+ok("rejects look-alike write tools", () => { for (const t of ["put_metric", "delete_widget", "run_logs_query", "query_logs_raw"]) assert.equal(permissionDecision({ kind: "custom-tool", toolName: t }).kind, "reject"); });
 
 console.log("openrouter: PKCE S256 code challenge");
 ok("verifier is a 43-char base64url string", () => { const v = makeVerifier(); assert.match(v, /^[A-Za-z0-9_-]{43}$/); });

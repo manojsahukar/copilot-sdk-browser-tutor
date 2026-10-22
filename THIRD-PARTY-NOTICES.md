@@ -9,6 +9,8 @@ Their license files are not vendored here; install dependencies to obtain them.
 | [`@aws-sdk/client-secrets-manager`](https://github.com/aws/aws-sdk-js-v3) | Apache-2.0 | Reads app secrets from AWS Secrets Manager at runtime. |
 | [`marked`](https://github.com/markedjs/marked) | MIT | Vendored (self-hosted) at `public/vendor/marked.min.js` and served from `/static`; parses the tutor's Markdown in the browser. |
 | [`DOMPurify`](https://github.com/cure53/DOMPurify) | Apache-2.0 OR MPL-2.0 | Vendored (self-hosted) at `public/vendor/purify.min.js` and served from `/static`; sanitizes the rendered Markdown so model output cannot inject HTML/scripts. |
+| [Apache ECharts](https://github.com/apache/echarts) (+ [ZRender](https://github.com/ecomfe/zrender)) | Apache-2.0 (ZRender: BSD-3-Clause) | Custom tree-shaken build vendored at `public/vendor/echarts.custom.min.js` (built by `scripts/build-echarts.sh`), lazy-loaded from `/static` to draw the observability widgets. Contains no `eval`/`new Function`. |
+| [`@aws-sdk/client-cloudwatch`, `client-cloudwatch-logs`, `client-dynamodb`](https://github.com/aws/aws-sdk-js-v3) | Apache-2.0 | Read-only metrics (GetMetricData), allowlisted Logs Insights queries, telemetry/health table. |
 
 Dev-only (not shipped to Lambda):
 

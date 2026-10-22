@@ -12,6 +12,10 @@ import { GOTCHAS } from "./gotchas.mjs";
 import { DEMOS, DEMO_IDS } from "./demos.mjs";
 import { OR_MODELS, OR_DEFAULT_MODEL, OR_REVOKE_URL, OR_KEY_RE, isAllowedModel, makeVerifier, challengeFor, authorizeUrl, exchangeCode, keySettingsUrl } from "./openrouter.mjs";
 import { isLab, handleLab, signLabToken } from "./xsslab.mjs";
+import { scrubTokens } from "./scrub.mjs";
+import { validateSpec } from "./widgets.mjs";
+import { resolveData, recordTurn, recordWeb, userHash, setUserKey, METRICS, ENDPOINTS } from "./metrics.mjs";
+import { readiness } from "./health.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "..", "public");
@@ -31,6 +35,7 @@ const cfg = {
   labUrl: (process.env.LAB_URL || "").replace(/\/$/, ""),
   labPort: Number(process.env.LAB_PORT || 0),
   cookieDomain: process.env.COOKIE_DOMAIN || "",
+  obsAdmins: (process.env.OBS_ADMIN_LOGINS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   sessionCapDays: 7, // session lifetime cap; access tokens are refreshed underneath (refresh token lasts 6 months)
 };
 // Gotcha 4: the dev bypass must be impossible in production.
@@ -56,6 +61,7 @@ async function ensureSecrets() {
     }
     KEY = crypto.createHash("sha256").update("browser-tutor:" + ss).digest();
     ORIGIN_VERIFY = s.originVerify || "";
+    setUserKey(crypto.createHmac("sha256", KEY).update("telemetry-user-hash").digest());
   })();
   await secretsP;
 }
@@ -116,12 +122,39 @@ function sameOrigin(req) {
   const o = req.headers.origin; if (!o) return false;
   try { return new URL(o).host === req.headers.host || o === new URL(cfg.baseUrl).origin; } catch { return false; }
 }
-const scrubTokens = (s) => String(s).replace(/gh[opsur]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|sk-or-[A-Za-z0-9._-]+/g, "[redacted]");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json; charset=utf-8" };
 function serveStatic(res, file, extra = {}) {
   const p = path.join(PUBLIC, path.normalize(file).replace(/^(\.\.[/\\])+/, ""));
   if (!p.startsWith(PUBLIC) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) return send(res, 404, { error: "not found" });
+  // Vendored libraries are versioned in their file name / query (?v=): let the browser cache them (the chart
+  // library is ~530 KB, lazy-loaded only when a chart renders).
+  if (p.startsWith(path.join(PUBLIC, "vendor") + path.sep)) extra = { "Cache-Control": "public, max-age=604800, immutable", ...extra };
   send(res, 200, fs.readFileSync(p), MIME[path.extname(p)] || "application/octet-stream", extra);
+}
+// ---------- observability helpers ----------
+const userOf = (sess) => ({ uh: userHash(sess.login), admin: cfg.obsAdmins.includes(String(sess.login).toLowerCase()) });
+const READY_HOSTS = () => [["main", new URL(cfg.baseUrl).hostname], ...(cfg.siblingHost ? [["sibling", cfg.siblingHost]] : []), ...(cfg.labHost ? [["xss-lab", cfg.labHost]] : [])]
+  .filter(([, h]) => h && !["localhost", "127.0.0.1", "placeholder.invalid"].includes(h));
+let readyMemo = null;
+async function readyCached() {
+  if (readyMemo && Date.now() - readyMemo.at < 60e3) return readyMemo.val; // whole-result cache: unauthenticated callers can't amplify
+  const val = await readiness({ hosts: READY_HOSTS() }); readyMemo = { at: Date.now(), val }; return val;
+}
+function errType(msg) {
+  const m = String(msg || "").toLowerCase();
+  if (/deadline/.test(m)) return "deadline";
+  if (/\b429\b|rate.?limit|too many requests/.test(m)) return "rate_limit";
+  if (/402|insufficient|credit/.test(m)) return "credits";
+  if (/401|403|token|auth|forbidden/.test(m)) return "auth";
+  if (/tool/.test(m)) return "tool_support";
+  if (/404|not a valid model|unknown model/.test(m)) return "model_unavailable";
+  if (/still answering/.test(m)) return "busy";
+  return "other";
+}
+const metricsLog = new Map();
+function metricsRateOk(sid, max = 240) {
+  const now = Date.now(); const arr = (metricsLog.get(sid) || []).filter((t) => now - t < 3600e3);
+  if (arr.length >= max) return false; arr.push(now); metricsLog.set(sid, arr); return true;
 }
 // The widget pilot is a STATIC site that talks straight to OpenRouter, so its documents need a
 // different CSP than the app's strict "connect-src 'self'": connect to openrouter.ai is allowed.
@@ -207,6 +240,9 @@ async function handle(req, res) {
   if (isSibling(req)) return handleSibling(req, res, p);
   if (isLab(req, cfg)) return handleLab(req, res, p, { mainOrigin: new URL(cfg.baseUrl).origin, key: KEY, secure });
   const sess = getSession(req);
+
+  // Readiness: deep but cached, unauthenticated-safe (status + latencies + cert days only; no secrets/ARNs/keys).
+  if (p === "/readyz") { const r = await readyCached(); return send(res, r.status === "down" ? 503 : 200, r); }
 
   if (p === "/healthz/stream") {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
@@ -344,6 +380,26 @@ async function handle(req, res) {
     return send(res, 200, { ok: true, revokeUrl: OR_REVOKE_URL, settingsUrl, note: "Key dropped from this session. Revoke it in your OpenRouter key settings to be sure." });
   }
 
+  // ---- metrics & widgets (signed-in; app/browser metrics are scoped to this user unless scope=site aggregates) ----
+  if (p === "/api/metrics/widget" && req.method === "POST") {
+    if (!sameOrigin(req)) return send(res, 403, { error: "bad origin" });
+    if (!metricsRateOk(sess.sid)) return send(res, 429, { error: "Too many metric refreshes; try again later" });
+    let b; try { b = await readBody(req, 16 * 1024); } catch { return send(res, 400, { error: "bad body" }); }
+    const v = validateSpec(b.spec);
+    if (!v.ok) return send(res, 400, { error: "spec rejected", details: v.errors });
+    try { return send(res, 200, { spec: v.spec, data: await resolveData(v.spec, { uh: userOf(sess).uh }) }); }
+    catch (e) { console.error("[metrics]", scrubTokens(e?.message || e)); return send(res, 502, { error: "metrics source unavailable" }); }
+  }
+  if (p === "/api/metrics/catalog") return send(res, 200, { metrics: Object.fromEntries(Object.entries(METRICS).map(([k, m]) => [k, { label: m.label, unit: m.unit, src: m.src, aggs: m.aggs, groups: m.groups }])), endpoints: ENDPOINTS });
+  // Browser performance aggregates (rounded; no URL, UA or fingerprint). One beacon per page load at most.
+  if (p === "/api/metrics/web" && req.method === "POST") {
+    if (!sameOrigin(req)) return send(res, 403, { error: "bad origin" });
+    if (!metricsRateOk("web:" + sess.sid, 60)) return send(res, 204, "");
+    let b; try { b = await readBody(req, 2048); } catch { return send(res, 400, { error: "bad body" }); }
+    await recordWeb(userOf(sess).uh, b || {}).catch(() => {});
+    return send(res, 204, "");
+  }
+
   if (p === "/api/chat" && req.method === "POST") {
     if (!sameOrigin(req)) return send(res, 403, { error: "bad origin" });
     if (!rateOk(sess.sid)) return send(res, 429, { error: `Limit of ${cfg.maxTurnsPerHour} messages/hour reached` });
@@ -367,12 +423,21 @@ async function handle(req, res) {
 
     res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", Connection: "keep-alive" });
     let produced = false;
-    const emit = (o) => { if (o && (o.type === "delta" || o.type === "final")) produced = true; res.write(`data: ${JSON.stringify(o)}\n\n`); };
+    const t0 = Date.now(); const tel = { ttft: null, tools: 0, retries: 0 };
+    const emit = (o) => {
+      if (o && (o.type === "delta" || o.type === "final")) { produced = true; if (tel.ttft == null) tel.ttft = Date.now() - t0; }
+      if (o && o.type === "tool") tel.tools++;
+      res.write(`data: ${JSON.stringify(o)}\n\n`);
+    };
+    const user = userOf(sess);
+    let agentRef = null, turnErr = null;
     const ping = setInterval(() => res.write(": ping\n\n"), 15000);
     const isRateLimited = (m) => /\b429\b|rate.?limit|too many requests/i.test(m);
     try {
-      const agent = await getAgent(sess, cfg.devBypass);
+      const agent = await getAgent(sess, cfg.devBypass); agentRef = agent;
       const turn = () => runTurn(agent, {
+        user, readiness: readyCached,
+        widgets: Array.isArray(body.widgets) ? body.widgets.slice(0, 16) : [],
         message,
         fingerprint: body.fingerprint && typeof body.fingerprint === "object" ? body.fingerprint : null,
         demoResults: body.demoResults && typeof body.demoResults === "object" ? body.demoResults : null,
@@ -387,17 +452,27 @@ async function handle(req, res) {
         // One automatic retry with backoff for an OpenRouter 429 (free pool is noisy), but only if we have not
         // streamed any answer yet, so the user never sees a duplicated reply.
         if (sess.provider === "openrouter" && isRateLimited(raw) && !produced) {
-          emit({ type: "notice", text: "OpenRouter rate-limited that request. Retrying once…" });
+          emit({ type: "notice", text: "OpenRouter rate-limited that request. Retrying once…" }); tel.retries++;
           await new Promise((r) => setTimeout(r, 1500));
           await turn();
         } else { throw e; }
       }
       emit({ type: "done" });
     } catch (e) {
-      const msg = scrubTokens(e?.message || e);
+      const msg = scrubTokens(e?.message || e); turnErr = msg;
       console.error("[chat]", msg);
       emit({ type: "error", message: friendlyError(msg, sess.provider), canSwitch: isRateLimited(msg) || /deadline|tool call/i.test(msg) }); // gotcha 10
-    } finally { clearInterval(ping); }
+    } finally {
+      clearInterval(ping);
+      // Per-turn telemetry: numbers + categories only (no message text, no login: a keyed pseudonymous hash).
+      const u = (agentRef && agentRef.ctx && agentRef.ctx.usage) || {};
+      const engine = sess.provider === "openrouter" && sess.or ? "openrouter" : "copilot";
+      const rec = { t: t0, engine, model: engine === "openrouter" ? sess.or.model : (u.model || process.env.COPILOT_MODEL || "copilot-default"),
+        ms: Date.now() - t0, ttft: tel.ttft ?? undefined, tools: tel.tools, retries: tel.retries, ok: turnErr ? 0 : 1, err: turnErr ? errType(turnErr) : undefined,
+        tin: u.tin || undefined, tout: u.tout || undefined };
+      console.log(JSON.stringify({ bt: "turn", uh: user.uh, ...rec }));
+      recordTurn(user.uh, rec);
+    }
     return res.end();
   }
   send(res, 404, { error: "not found" });

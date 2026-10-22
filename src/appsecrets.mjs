@@ -2,17 +2,19 @@
 // {client_id, client_secret, session_secret, origin_verify}; nothing secret is in Lambda env vars.
 // Locally we fall back to env (SESSION_SECRET, ORIGIN_VERIFY, GITHUB_CLIENT_ID/SECRET).
 let cached = null;
-export async function appSecrets() {
-  if (cached) return cached;
+export async function appSecrets({ fresh = false } = {}) {
+  if (cached && !fresh) return cached;
   const arn = process.env.GITHUB_OAUTH_SECRET_ARN;
   if (arn) {
-    cached = (async () => {
+    const p = (async () => {
       const { SecretsManagerClient, GetSecretValueCommand } = await import("@aws-sdk/client-secrets-manager");
       const sm = new SecretsManagerClient({});
       const r = await sm.send(new GetSecretValueCommand({ SecretId: arn }));
       const j = JSON.parse(r.SecretString || "{}");
       return { clientId: j.client_id || "", clientSecret: j.client_secret || "", sessionSecret: j.session_secret || "", originVerify: j.origin_verify || "" };
-    })().catch((e) => { cached = null; throw e; });
+    })();
+    if (fresh) return p; // readiness probe: real round-trip, never replaces the app's cached copy
+    cached = p.catch((e) => { cached = null; throw e; });
     return cached;
   }
   return {

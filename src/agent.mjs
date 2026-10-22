@@ -12,9 +12,15 @@ import { GOTCHAS } from "./gotchas.mjs";
 import { DEMOS, DEMO_IDS } from "./demos.mjs";
 import { refreshGitHubToken } from "./appsecrets.mjs";
 import { buildProvider, OR_DEFAULT_MODEL, isAllowedModel } from "./openrouter.mjs";
+import { WIDGET_SCHEMA, CHANGES_SCHEMA, validateSpec, mergeChanges } from "./widgets.mjs";
+import { METRIC_IDS, AGGS, RANGES, INTERVALS, GROUPS, LOG_TEMPLATE_IDS, resolveData, summarize, queryLogs, healthSummary } from "./metrics.mjs";
+import { markRuntimeOk } from "./health.mjs";
 
-const ALLOWED_TOOLS = new Set(["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo", "suggest_followups"]);
+// Deny-by-default exact allowlist: 5 tutor tools + 5 read-only observability tools.
+const ALLOWED_TOOLS = new Set(["get_browser_fingerprint", "get_request_headers", "get_gotchas", "run_demo", "suggest_followups",
+  "query_metrics", "render_widget", "update_widget", "query_logs", "check_health"]);
 export { ALLOWED_TOOLS };
+export const _toolsForTest = (ctx) => tools(ctx);
 
 const BASE_DIR = process.env.COPILOT_HOME_DIR || path.join(os.tmpdir(), "browser-tutor-copilot");
 const MODEL = process.env.COPILOT_MODEL || undefined; // undefined => runtime default (copilot engine only)
@@ -93,6 +99,29 @@ export function validateFollowups(arr) {
   return out;
 }
 
+// Audit every observability read: who (pseudonymous), what, how much came back. Never the data itself.
+function audit(ctx, tool, what, extra = {}) {
+  console.log(JSON.stringify({ bt: "audit", uh: ctx.user ? ctx.user.uh : null, tool, what, ...extra }));
+}
+const { $schema: _s, ...RENDER_PARAMS } = WIDGET_SCHEMA;
+// Sampled points so the model can correlate series without receiving the full set.
+function withSamples(data, sum) {
+  if (data.kind) return sum;
+  sum.series.forEach((x, i) => {
+    const pts = data.series[i].points; const step = Math.max(1, Math.ceil(pts.length / 24));
+    x.sampled_points = pts.filter((_, j) => j % step === 0 || j === pts.length - 1).map((p) => [new Date(p[0]).toISOString().slice(5, 16).replace("T", " "), p[1]]);
+  });
+  return sum;
+}
+async function renderInto(ctx, spec, op) {
+  const data = await resolveData(spec, { uh: ctx.user.uh });
+  const prev = ctx.widgets.get(spec.widget_id);
+  ctx.widgets.set(spec.widget_id, spec);
+  ctx.emit && ctx.emit({ type: "widget", op: prev ? "update" : "render", spec, data });
+  audit(ctx, op, spec.widget_id, { type: spec.type, series: spec.series.map((x) => x.metric), range: spec.range, scope: spec.scope });
+  return { ok: true, widget_id: spec.widget_id, action: prev ? "updated in place" : "rendered", spec, data_summary: withSamples(data, summarize(data)) };
+}
+
 function tools(ctx) {
   const defs = [
     {
@@ -137,6 +166,61 @@ function tools(ctx) {
         return { accepted: ctx.followups.length };
       },
     },
+    {
+      name: "query_metrics",
+      description: "Read-only. Fetch a SMALL aggregated time series for ONE allowlisted metric (no charts drawn). Infrastructure (site-wide, CloudWatch): lambda_invocations, lambda_duration_ms, lambda_errors, lambda_throttles, lambda_concurrency, cf_requests, cf_4xx_rate, cf_5xx_rate, cf_bytes_down, cf_availability_pct (group_by distribution: main/sibling/lab). Health probes every 5 min: uptime_pct, probe_latency_ms, cert_days (group_by endpoint: main/ready/sibling/lab). App telemetry per chat turn: reply_latency_ms, ttft_ms, tool_calls, retries_429, turn_errors, turns, tokens_in, tokens_out (scope me|site; group_by engine/model/error_type). Browser: web_*_ms, web_cls, web_heap_mb. Returns totals, min/max/peak and <=24 sampled points per series. Use it to check numbers before answering or to correlate series.",
+      parameters: { type: "object", additionalProperties: false, required: ["metric"], properties: {
+        metric: { type: "string", enum: METRIC_IDS }, agg: { type: "string", enum: AGGS }, range: { type: "string", enum: RANGES }, interval: { type: "string", enum: INTERVALS },
+        group_by: { type: "string", enum: GROUPS }, scope: { type: "string", enum: ["me", "site"] }, filters: RENDER_PARAMS.properties.filters } },
+      handler: async (a = {}) => {
+        const v = validateSpec({ widget_id: "q-tmp", type: "line", series: [{ metric: a.metric, ...(a.agg ? { agg: a.agg } : {}) }], range: a.range || "24h",
+          ...(a.interval ? { interval: a.interval } : {}), ...(a.group_by ? { group_by: a.group_by } : {}), ...(a.scope ? { scope: a.scope } : {}), ...(a.filters ? { filters: a.filters } : {}) });
+        if (!v.ok) return { error: "invalid query", details: v.errors };
+        const data = await resolveData(v.spec, { uh: ctx.user.uh });
+        audit(ctx, "query_metrics", a.metric, { range: v.spec.range, scope: v.spec.scope, samples: data.samples });
+        return withSamples(data, summarize(data));
+      },
+    },
+    {
+      name: "render_widget",
+      description: "Draw a chart/dashboard widget in the chat from a SMALL declarative spec (never code, URLs, HTML or data points: the server fetches real data itself and validates the spec against a JSON schema; unknown keys are rejected). Types: line, area, bar, stacked, pie, table, stat, and health widgets status (per-endpoint tiles), uptime (24h/7d/30d uptime vs slo + error budget), incidents (timeline of contiguous failures). Health widgets use series [{metric:'uptime_pct'}]. Use axis:'right' for a second unit, thresholds for SLO/limit lines, example_data:true ONLY if the user explicitly asks for demo data. If a widget with this widget_id already exists it is updated in place, so to EDIT an existing widget prefer update_widget.",
+      parameters: RENDER_PARAMS,
+      handler: async (raw = {}) => {
+        const v = validateSpec(raw);
+        if (!v.ok) { audit(ctx, "render_widget", String(raw && raw.widget_id).slice(0, 32), { rejected: true }); return { error: "spec rejected", details: v.errors, hint: "Send only the documented keys; no data, code, URLs or HTML." }; }
+        return renderInto(ctx, v.spec, "render_widget");
+      },
+    },
+    {
+      name: "update_widget",
+      description: "Edit an EXISTING widget in place (keeps its version history so the user can undo): change type, series/metric, range, interval, group_by, scope, filters, axes, thresholds, slo or title. Only send the keys that change. Current widget ids are listed in the message context.",
+      parameters: { type: "object", additionalProperties: false, required: ["widget_id", "changes"], properties: { widget_id: WIDGET_SCHEMA.properties.widget_id, changes: CHANGES_SCHEMA } },
+      handler: async ({ widget_id, changes } = {}) => {
+        const cur = ctx.widgets.get(widget_id);
+        if (!cur) return { error: "no such widget", existing: [...ctx.widgets.keys()], hint: "Use render_widget to create it." };
+        const v = mergeChanges(cur, changes);
+        if (!v.ok) { audit(ctx, "update_widget", widget_id, { rejected: true }); return { error: "change rejected", details: v.errors }; }
+        return renderInto(ctx, v.spec, "update_widget");
+      },
+    },
+    {
+      name: "query_logs",
+      description: "Read-only CloudWatch Logs Insights over the tutor's OWN log group, using allowlisted templates only (no free-form queries): errors_by_type, error_timeline (turns, errors, avg/p95 latency, 429 retries per bin), rate_limits, slow_turns (threshold_ms 2000/5000/10000/20000/30000), lambda_reports (duration, memory, cold starts), recent_errors (site owner only). Time-boxed (~20 s), row-capped (<=50), every value masked. Log retention is 7 days. Times are UTC.",
+      parameters: { type: "object", additionalProperties: false, required: ["template"], properties: {
+        template: { type: "string", enum: LOG_TEMPLATE_IDS }, range: { type: "string", enum: ["1h", "6h", "24h", "3d", "7d"] }, scope: { type: "string", enum: ["me", "site"] },
+        threshold_ms: { type: "integer", enum: [2000, 5000, 10000, 20000, 30000] }, limit: { type: "integer", minimum: 1, maximum: 50 } } },
+      handler: async (a = {}) => {
+        const t = Date.now(); const r = await queryLogs(a, ctx.user);
+        audit(ctx, "query_logs", a.template, { range: a.range || "24h", scope: r.scope, rows: r.rows ? r.rows.length : 0, ms: Date.now() - t, status: r.status || r.error });
+        return r;
+      },
+    },
+    {
+      name: "check_health",
+      description: "Read-only availability snapshot: live /readyz deep check (Secrets Manager, Copilot runtime, OpenRouter, DNS + TLS cert days per hostname), the latest 5-minute probe per endpoint (main, readyz, sibling, xss-lab), uptime % for 24h/7d/30d vs the 99.5% SLO with error budget, CloudFront-derived availability, and the most recent incidents. Use for 'is it up?', 'availability last week?', 'when was the last outage?'.",
+      parameters: { type: "object", properties: {} },
+      handler: async () => { const r = await healthSummary(ctx.readiness || (async () => ({ status: "unknown" }))); audit(ctx, "check_health", "summary", { incidents: r.last_incidents.length }); return r; },
+    },
   ];
   return defs.map((d) => ({ ...d, handler: wrapTool(d.name, d.handler) }));
 }
@@ -156,7 +240,7 @@ function makeTokenProvider(auth) {
 }
 
 async function buildSession(client, sess) {
-  const ctx = { fingerprint: null, serverView: null, demoResults: {} };
+  const ctx = { fingerprint: null, serverView: null, demoResults: {}, widgets: new Map(), user: { uh: "", admin: false } };
   const auth = { token: sess.token || null, refresh: sess.refresh || null, atExp: sess.atExp || 0 };
   const engine = engineOf(sess);
   const common = {
@@ -180,6 +264,7 @@ async function buildSession(client, sess) {
     };
   }
   const session = await client.createSession(cfg);
+  markRuntimeOk();
   return { session, ctx, auth };
 }
 
@@ -199,19 +284,25 @@ export async function getAgent(sess, devBypass) {
   return a;
 }
 
-export async function runTurn(a, { message, fingerprint, demoResults, history, serverView, emit, deadlineMs = 42000 }) {
+export async function runTurn(a, { message, fingerprint, demoResults, history, serverView, emit, user, widgets, readiness, deadlineMs = 42000 }) {
   if (a.busy) throw new Error("Still answering your previous message");
   a.busy = true;
   if (fingerprint) a.ctx.fingerprint = fingerprint;
   if (demoResults) a.ctx.demoResults = { ...a.ctx.demoResults, ...demoResults };
   a.ctx.serverView = serverView;
   a.ctx.followups = [];
+  a.ctx.emit = emit; a.ctx.readiness = readiness; a.ctx.usage = { tin: 0, tout: 0, model: null };
+  if (user) a.ctx.user = user;
+  // Widgets currently on the user's screen (from their browser): re-validated, never trusted as-is.
+  a.ctx.widgets = new Map();
+  for (const w of Array.isArray(widgets) ? widgets.slice(0, 16) : []) { const v = validateSpec(w); if (v.ok) a.ctx.widgets.set(v.spec.widget_id, v.spec); }
   let prompt = message;
   if (a.fresh && history.length) {
     const t = history.map((m) => `${m.role === "user" ? "User" : "Tutor"}: ${String(m.text || "").slice(0, 1500)}`).join("\n");
     prompt = `(Context: earlier part of this conversation, restored)\n${t}\n\n(New message)\n${message}`;
   }
   a.fresh = false;
+  if (a.ctx.widgets.size) prompt += `\n\n(Widgets on screen, edit these with update_widget instead of creating duplicates: ${JSON.stringify([...a.ctx.widgets.values()].map((w) => ({ widget_id: w.widget_id, type: w.type, title: w.title, metrics: w.series.map((x) => x.metric), range: w.range, group_by: w.group_by })))})`;
   const offs = [];
   const finalParts = [];
   let timer;
@@ -223,6 +314,7 @@ export async function runTurn(a, { message, fingerprint, demoResults, history, s
       // delta accumulation can contain a duplicate; we use these to REPLACE it and de-duplicate deterministically.
       offs.push(s.on("assistant.message", (e) => { const c = e?.data?.content; if (typeof c === "string" && c.trim()) finalParts.push(c); }));
       offs.push(s.on("tool.execution_start", (e) => emit({ type: "tool", name: e.data.toolName || e.data.mcpToolName || "tool" })));
+      offs.push(s.on("assistant.usage", (e) => { const d = e?.data || {}; a.ctx.usage.tin += Number(d.inputTokens) || 0; a.ctx.usage.tout += Number(d.outputTokens) || 0; if (d.model) a.ctx.usage.model = String(d.model).slice(0, 60); }));
       offs.push(s.on("session.error", (e) => reject(new Error(e.data?.message || "Copilot session error"))));
       offs.push(s.on("session.idle", () => resolve()));
       // Deadline: the bundled runtime retries provider 429s internally for ~60s, which exceeds CloudFront's 60s

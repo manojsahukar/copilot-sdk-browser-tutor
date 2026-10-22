@@ -13,6 +13,9 @@
     "dev": "DEV_AUTH_BYPASS=1 node src/server.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.1155.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1155.0",
+    "@aws-sdk/client-dynamodb": "^3.1155.0",
     "@aws-sdk/client-secrets-manager": "^3.1152.0",
     "@github/copilot-sdk": "1.0.22"
   },

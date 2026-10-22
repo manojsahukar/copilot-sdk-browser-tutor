@@ -26,6 +26,12 @@ ORIGIN_VERIFY="$(aws secretsmanager get-secret-value --secret-id "$GITHUB_OAUTH_
   --query SecretString --output text | jq -r '.origin_verify // empty')"
 : "${ORIGIN_VERIFY:?secret JSON must contain origin_verify (openssl rand -hex 32); also ensure session_secret is set}"
 
+# Observability: look up this stack's CloudFront distribution ids (read-only) for the metrics catalogue.
+dist_id() { aws cloudformation describe-stack-resource --stack-name browser-tutor --region "$AWS_REGION" --logical-resource-id "$1" \
+  --query StackResourceDetail.PhysicalResourceId --output text 2>/dev/null || true; }
+MAIN_DIST="$(dist_id Distribution)"; SIB_DIST="$(dist_id SiblingDistribution)"; LAB_DIST="$(dist_id LabDistribution)"
+OBS_ADMIN_LOGINS="${OBS_ADMIN_LOGINS:-${ALLOWED_LOGINS%%,*}}"
+
 ./deploy/build.sh
 sam deploy \
   --template-file deploy/template.yaml \
@@ -33,7 +39,7 @@ sam deploy \
   --region "$AWS_REGION" \
   --resolve-s3 \
   --capabilities CAPABILITY_IAM \
-  --no-fail-on-empty-changeset \
+  --no-fail-on-empty-changeset ${SAM_EXTRA_ARGS:-} \
   --tags project=browser-tutor \
   --parameter-overrides \
     GitHubOAuthSecretArn="$GITHUB_OAUTH_SECRET_ARN" \
@@ -48,6 +54,10 @@ sam deploy \
     ${SIBLING_CERTIFICATE_ARN:+SiblingCertificateArn="$SIBLING_CERTIFICATE_ARN"} \
     ${LAB_DOMAIN_NAME:+LabDomainName="$LAB_DOMAIN_NAME"} \
     ${LAB_CERTIFICATE_ARN:+LabCertificateArn="$LAB_CERTIFICATE_ARN"} \
-    ${COOKIE_DOMAIN:+CookieDomain="$COOKIE_DOMAIN"}
+    ${COOKIE_DOMAIN:+CookieDomain="$COOKIE_DOMAIN"} \
+    ${MAIN_DIST:+MainDistributionId="$MAIN_DIST"} \
+    ${SIB_DIST:+SiblingDistributionId="$SIB_DIST"} \
+    ${LAB_DIST:+LabDistributionId="$LAB_DIST"} \
+    ${OBS_ADMIN_LOGINS:+ObsAdminLogins="$OBS_ADMIN_LOGINS"}
 aws cloudformation describe-stacks --stack-name browser-tutor --region "$AWS_REGION" --query 'Stacks[0].Outputs' --output table
 # Teardown: sam delete --stack-name browser-tutor --region "$AWS_REGION"

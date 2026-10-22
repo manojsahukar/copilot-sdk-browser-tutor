@@ -20,7 +20,7 @@ function loadHistory() {
     if (o && Array.isArray(o.messages)) { chatHistory = o.messages; lastChips = Array.isArray(o.chips) ? o.chips : []; }
   } catch {}
 }
-function clearSiteData() { try { localStorage.removeItem(HIST_KEY); sessionStorage.removeItem("bt_demo"); } catch {} chatHistory = []; lastChips = []; }
+function clearSiteData() { try { localStorage.removeItem(HIST_KEY); sessionStorage.removeItem("bt_demo"); } catch {} if (window.BTW) BTW.clear(); chatHistory = []; lastChips = []; }
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
@@ -54,19 +54,24 @@ const MD = (() => {
 // ---------- tabs ----------
 function showTab(name) {
   document.querySelectorAll(".tab[data-tab]").forEach((x) => { const on = x.dataset.tab === name; x.classList.toggle("active", on); x.setAttribute("aria-selected", on); });
-  ["probe", "chat"].forEach((id) => ($(id).hidden = id !== name));
+  ["probe", "chat", "health", "metrics"].forEach((id) => ($(id).hidden = id !== name));
   document.body.classList.toggle("in-chat", name === "chat");
   if (name === "chat") { scrollToEnd(true); refreshChips(); if (matchMedia("(pointer: fine)").matches) q.focus(); }
   else window.scrollTo(0, 0);
+  if (name === "health") BTW.openHealth();
+  if (name === "metrics") BTW.openMetrics();
 }
 document.querySelectorAll(".tab[data-tab]").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
-if (location.hash === "#chat") setTimeout(() => showTab("chat"), 0);
+{ const h = location.hash.slice(1); if (["chat", "health", "metrics"].includes(h)) setTimeout(() => showTab(h), 0); }
+document.querySelectorAll("[data-refresh]").forEach((b) => (b.onclick = () => BTW.refreshBoard(b.dataset.refresh)));
+document.querySelectorAll("[data-ask]").forEach((b) => (b.onclick = () => { showTab("chat"); send(b.dataset.ask); }));
 
 // ---------- identity + model engine ----------
 let ME = null;
 function loadMe() {
   return fetch("/api/me").then((r) => (r.ok ? r.json() : Promise.reject())).then((m) => {
     ME = m;
+    if (window.BTW && !loadMe.inited) { loadMe.inited = true; BTW.init(m.login); restoreWidgets(); }
     $("me").innerHTML = (m.avatar ? `<img class="av" src="${encodeURI(m.avatar)}" alt=""> ` : "") + `<span class="login">${esc(m.login)}</span>`;
     renderEngine();
   }).catch(() => (location.href = "/"));
@@ -179,12 +184,14 @@ const DEMO_CHIP = {
   cross_site_fetch: "What is a cross-site request?",
 };
 const STARTERS = ["What does my browser reveal?", "How unique am I?", "What are Agent SDK gotchas?"];
+const OBS_CHIPS = ["Is the site up?", "Plot my reply latency over time", "Show errors last 24h", "Lambda p95 duration last 24h", "When was the last outage?"];
 function demosRun() { try { return Object.keys(JSON.parse(sessionStorage.getItem("bt_demo") || "{}")); } catch { return []; } }
 function curatedChips() {
   const run = new Set(demosRun());
   const notRun = Object.keys(DEMO_CHIP).filter((d) => !run.has(d)).map((d) => DEMO_CHIP[d]);
   const out = [];
-  for (const c of [...notRun, ...STARTERS]) if (!out.includes(c)) out.push(c);
+  const obs = OBS_CHIPS.slice((chatHistory.length / 2) % OBS_CHIPS.length).concat(OBS_CHIPS).slice(0, 3); // rotate
+  for (const c of [...obs, ...notRun.slice(0, 2), ...STARTERS]) if (!out.includes(c)) out.push(c);
   return out.slice(0, 6);
 }
 function renderChips(items) {
@@ -222,7 +229,7 @@ function addUser(text) {
 }
 function addBot() {
   const d = document.createElement("div"); d.className = "msg bot";
-  d.innerHTML = `<div class="tools" hidden><button class="tools-toggle" type="button" aria-expanded="false"></button><div class="tools-list" hidden></div></div><div class="content"><span class="muted">thinking…</span></div>`;
+  d.innerHTML = `<div class="tools" hidden><button class="tools-toggle" type="button" aria-expanded="false"></button><div class="tools-list" hidden></div></div><div class="content"><span class="muted">thinking…</span></div><div class="widgets"></div>`;
   log.appendChild(d); scrollToEnd();
   const toggle = d.querySelector(".tools-toggle"), list = d.querySelector(".tools-list");
   toggle.onclick = () => { const open = list.hidden; list.hidden = !open; toggle.setAttribute("aria-expanded", String(open)); };
@@ -238,9 +245,14 @@ function restoreHistory() {
   if (!chatHistory.length) return;
   for (const m of chatHistory) {
     if (m.role === "user") addUser(m.text);
-    else { const b = addBot(); b.querySelector(".content").innerHTML = MD(m.text); }
+    else { const b = addBot(); b.querySelector(".content").innerHTML = MD(m.text); b._w = Array.isArray(m.w) ? m.w : []; }
   }
   scrollToEnd(true);
+}
+// Widget cards are re-attached once we know the login (widget specs are stored per login; data is fetched fresh).
+function restoreWidgets() {
+  const seen = new Set();
+  log.querySelectorAll(".msg.bot").forEach((b) => (b._w || []).forEach((id) => { if (!seen.has(id) && BTW.latest(id)) { seen.add(id); BTW.attach(id, b.querySelector(".widgets")); } }));
 }
 
 // ---------- composer ----------
@@ -264,10 +276,10 @@ async function send(message) {
   const btn = $("sendBtn"); btn.disabled = true;
   try {
     const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, fingerprint: window.BT.shared ? window.BT.fingerprint : null, demoResults: JSON.parse(sessionStorage.getItem("bt_demo") || "null"), history: chatHistory }) });
+      body: JSON.stringify({ message, fingerprint: window.BT.shared ? window.BT.fingerprint : null, demoResults: JSON.parse(sessionStorage.getItem("bt_demo") || "null"), history: chatHistory.map(({ role, text }) => ({ role, text })), widgets: BTW.list() }) });
     if (!res.ok || !res.body) { const j = await res.json().catch(() => ({})); throw new Error(j.error || res.statusText); }
     const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
-    let followups = null;
+    let followups = null; const wids = [];
     for (;;) {
       const { value, done } = await reader.read(); if (done) break;
       buf += dec.decode(value, { stream: true });
@@ -280,12 +292,13 @@ async function send(message) {
         else if (ev.type === "tool") addTool(bot, ev.name);
         else if (ev.type === "notice") toast(ev.text);
         else if (ev.type === "followups") followups = Array.isArray(ev.items) ? ev.items : null;
+        else if (ev.type === "widget") { const r = BTW.apply(ev, bot); if (r && !wids.includes(r.id)) wids.push(r.id); }
         else if (ev.type === "error") { const e = new Error(ev.message); e.canSwitch = ev.canSwitch; throw e; }
       }
       scrollToEnd();
     }
     if (!text.trim()) content.innerHTML = "<span class='muted'>(No answer returned. Try again or switch model.)</span>";
-    chatHistory.push({ role: "user", text: message }, { role: "assistant", text });
+    chatHistory.push({ role: "user", text: message }, { role: "assistant", text, ...(wids.length ? { w: wids } : {}) });
     lastChips = (followups && followups.length) ? followups.slice(0, 4) : curatedChips();
     saveHistory();
     refreshChips();
