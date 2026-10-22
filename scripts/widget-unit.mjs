@@ -8,7 +8,7 @@ import { webcrypto, createHash } from "node:crypto";
 // Load widget.js in a DOM-less sandbox; it exposes pure internals on globalThis.__btw.
 const src = fs.readFileSync(new URL("../public/widget.js", import.meta.url), "utf8");
 const ctx = {
-  crypto: webcrypto, TextEncoder, TextDecoder, console,
+  crypto: webcrypto, TextEncoder, TextDecoder, console, URL,
   btoa: (s) => Buffer.from(s, "binary").toString("base64"),
   atob: (s) => Buffer.from(s, "base64").toString("binary"),
 };
@@ -90,6 +90,43 @@ await ok("pickModel: unknown saved id falls back to default", () => assert.equal
 await ok("'Auto (best available)' still selectable + at least one free model", () => {
   assert.ok(W.MODELS.some((m) => m.id === "openrouter/auto"));
   assert.ok(W.MODELS.some((m) => /:free$|\/free$/.test(m.id)));
+});
+
+console.log("safeHref (link filter)");
+const KEEP = ["https://kinetic.curiosta.com/scuba/#ch-pressure", "http://example.com/a?b=1", "/widget/storage.html", "/scuba/#x", "HTTPS://Example.com/"];
+const DROP = ["//evil.example/x", "/\\evil.example", "\\\\evil.example", "///evil.example", "https:evil.example", "https:/evil.example",
+  "https:///evil.example", "javascript:alert(1)", "JaVaScRiPt:alert(1)", " javascript:alert(1)", "java\tscript:alert(1)", "data:text/html,<b>x</b>",
+  "vbscript:x", "mailto:a@b.c", "tel:123", "ftp://example.com", "relative/path.html", "./x", "../x", "#frag", "?q=1", "", null, undefined,
+  "/ok\u0000x", "https://ex.com/\u2028", "https://exa mple.com", "/path with space", "http://\\evil.example"];
+for (const h of KEEP) await ok("keeps " + h, () => assert.ok(W.safeHref(h), h));
+for (const h of DROP) await ok("drops " + JSON.stringify(h), () => assert.equal(W.safeHref(h), "", String(h)));
+await ok("same-site root path returned unchanged", () => assert.equal(W.safeHref("/a/b#c"), "/a/b#c"));
+await ok("absolute URL is normalised (no smuggled host)", () => assert.equal(new URL(W.safeHref("https://good.example/x")).hostname, "good.example"));
+
+console.log("site options (data-*)");
+await ok("parseSuggestions: strings only, max 4, capped 140, bad JSON -> []", () => {
+  assert.deepEqual(Array.from(W.parseSuggestions('["a", 1, "", "b", {"x":1}, "c", "d", "e"]')), ["a", "b", "c", "d"]);
+  assert.equal(W.parseSuggestions(JSON.stringify(["x".repeat(500)]))[0].length, 141);
+  assert.equal(W.parseSuggestions("not json").length, 0);
+  assert.equal(W.parseSuggestions('{"a":1}').length, 0);
+  assert.equal(W.parseSuggestions(null).length, 0);
+});
+await ok("parsePageCap: default 6000, clamped to 1000..20000", () => {
+  assert.equal(W.parsePageCap(null), 6000); assert.equal(W.parsePageCap("abc"), 6000);
+  assert.equal(W.parsePageCap("10"), 1000); assert.equal(W.parsePageCap("999999"), 20000); assert.equal(W.parsePageCap("8000"), 8000);
+});
+await ok("persona is appended to the system prompt (cleaned, capped), core rules stay first", () => {
+  const m = W.buildMessages({ siteName: "S", persona: "Be a tutor.\u0007" + "y".repeat(5000), question: "q" });
+  assert.ok(m[0].content.startsWith("You are a helpful assistant embedded on S."));
+  assert.ok(m[0].content.includes("Site guidance from the site owner:\nBe a tutor."));
+  assert.ok(!m[0].content.includes("\u0007"));
+  assert.ok(m[0].content.length < 2000 + 2500);
+});
+await ok("no persona -> no site-guidance block", () => assert.ok(!W.buildMessages({ question: "q" })[0].content.includes("Site guidance")));
+await ok("pageCap limits the page text sent", () => {
+  const m = W.buildMessages({ page: { url: "/p", title: "P", text: "z".repeat(9000) }, pageCap: 1000, question: "q" });
+  const body = m[0].content.split("<<<END_PAGE>>>")[0];
+  assert.ok((body.match(/z/g) || []).length <= 1000);
 });
 
 console.log(`\nWIDGET UNIT TESTS PASSED (${pass})`);

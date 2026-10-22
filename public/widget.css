@@ -39,3 +39,11 @@
 @media (prefers-color-scheme: light) { .btw-remember { background: #f7f9fb; color: #5b6676; } }
 /* Narrow phones: the site name is already in the sheet's aria-label and the composer placeholder; give the model picker the room so "Auto (free models only)" reads in full. */
 @media (max-width: 420px) { .btw-title { display: none; } .btw-head { gap: 6px; padding: 8px 6px 8px 12px; } }
+/* Suggested-question chips (data-suggestions). Hidden once the visitor has asked something. */
+.btw-chips { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid #222b36; background: #0c1016; max-height: 140px; overflow-y: auto; }
+.btw-chips[hidden] { display: none; }
+.btw-chip { border: 1px solid #30363d; background: #161b22; color: #e6edf3; border-radius: 999px; padding: 6px 11px; font: 500 12.5px/1.25 system-ui, sans-serif; cursor: pointer; text-align: left; max-width: 100%; min-height: 32px; touch-action: manipulation; }
+.btw-chip:hover { border-color: #1f6feb; }
+.btw-chip:focus-visible { outline: 2px solid #1f6feb; outline-offset: 2px; }
+@media (prefers-color-scheme: light) { .btw-chips { background: #fafbfc; border-color: #eceff3; } .btw-chip { background: #fff; color: #1b1f24; border-color: #d0d7de; } }
+@media print { .btw-root { display: none !important; } }

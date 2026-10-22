@@ -8,13 +8,30 @@
  *           data-default-model="openrouter/free"
  *           data-index="/site-index.json"></script>
  *
+ * Optional attributes (all plain text, never HTML; omit any of them for the defaults):
+ *   data-persona       extra system-prompt guidance (role, tone, safety rules), appended after the core rules (<= 2000 chars)
+ *   data-suggestions   JSON array of up to 4 starter questions shown as tappable chips (each <= 140 chars)
+ *   data-exclude       CSS selectors removed from the page context (e.g. "#comments, .giscus, .quiz")
+ *   data-page-cap      max characters of current-page text sent to the model (default 6000, clamped 1000..20000)
+ *   data-fab-label     text of the floating button (default "💬 Ask")
+ *   data-greeting      first assistant message after connecting (Markdown, rendered through the sanitiser)
+ *   data-models        comma-separated model ids to replace the curated picker list
+ *
  * - OpenRouter OAuth PKCE (S256) done entirely in the browser. The sk-or key
  *   lives in sessionStorage ONLY (cleared on tab close / Disconnect).
  * - Chat goes straight to https://openrouter.ai/api/v1/chat/completions (stream).
  * - Page-aware + optional site-wide retrieval (BM25 over a build-time index).
- * - Renders Markdown with the vendored marked + DOMPurify. Never innerHTML raw output.
- * - Designed to run under a strict meta CSP: script-src 'self'; connect-src 'self'
- *   https://openrouter.ai. No inline handlers, no inline styles, no eval.
+ * - Renders Markdown with the vendored marked + DOMPurify (>= 3.2.4) using a PRIVATE DOMPurify instance, so its
+ *   link hook never touches other DOMPurify users on the host page. Never innerHTML raw output. Links are kept
+ *   only when they are absolute http(s) URLs or same-site root paths ("/x"); protocol-relative ("//host",
+ *   "/\\host"), other schemes and relative paths lose their href.
+ * - CSP: the widget needs NO inline script, inline style attribute, eval or third-party script. It works under a
+ *   CSP delivered EITHER as an HTTP header OR as a <meta http-equiv> tag (GitHub Pages can only do the meta).
+ *   Minimum it needs: script-src 'self'; style-src 'self'; connect-src https://openrouter.ai (+ 'self' for
+ *   data-index). It does not detect or require a CSP; it does listen for "securitypolicyviolation" events and,
+ *   if the host's CSP blocks openrouter.ai, tells the visitor (and ?btw_debug=1) instead of failing silently.
+ *   A meta CSP cannot carry frame-ancestors / report-uri / sandbox: set those as headers where the host allows.
+ *   Sizing uses CSSOM (element.style.x = ...), which CSP style-src does not block.
  *
  * Isolation: uses its OWN sessionStorage keys (btw_*). It never touches the
  * tutor's server-side session (bt_sess) or its chat history (bt_chat).
@@ -34,7 +51,7 @@
 
   // Own storage keys (never bt_sess / bt_chat).
   var K_KEY = "btw_or_key", K_UID = "btw_or_uid", K_MODEL = "btw_model",
-      K_CHAT = "btw_chat", K_PKCE = "btw_pkce",
+      K_CHAT = "btw_chat", K_PKCE = "btw_pkce", K_PENDQ = "btw_pending_q",
       // localStorage (survives a new tab / Custom Tab / installed-app return):
       K_REMEMBER = "btw_remember", K_PERSIST = "btw_or_key_persist", K_DEBUG = "btw_debug";
   var PKCE_TTL = 10 * 60 * 1000;            // matches OpenRouter's 10-minute code expiry
@@ -121,6 +138,32 @@
       .slice(0, k || 4);
   }
 
+  // Link filter for rendered replies. Returns the href to keep, or "" to drop it. Allowed: absolute http(s) URLs
+  // with a host, and same-site root paths ("/scuba/#ch-pressure"). Rejected: protocol-relative ("//host" and the
+  // browser-equivalent "/\\host"), every other scheme (javascript:, data:, vbscript:, mailto:, ...), relative paths,
+  // fragment-only links, and anything containing whitespace/control characters or a backslash (scheme smuggling).
+  function safeHref(h) {
+    h = String(h == null ? "" : h);
+    if (!h || /[\u0000-\u0020\u007f-\u009f\u2028\u2029\\]/.test(h)) return "";
+    if (/^\/(?![\/\\])/.test(h)) return h;                      // same-site root path, not "//" or "/\\"
+    if (!/^https?:\/\/[^\/\\]/i.test(h)) return "";              // only explicit http:// or https:// with a host
+    try {
+      var u = new URL(h);
+      return (u.protocol === "https:" || u.protocol === "http:") && u.hostname ? u.href : "";
+    } catch (e) { return ""; }
+  }
+
+  // Parse a data-suggestions JSON array: strings only, cleaned, <= 140 chars each, <= 4 of them.
+  function parseSuggestions(raw) {
+    try {
+      var a = JSON.parse(raw || "[]");
+      return Array.isArray(a) ? a.filter(function (x) { return typeof x === "string" && x.trim(); })
+        .map(function (x) { return cleanText(x, 140); }).slice(0, 4) : [];
+    } catch (e) { return []; }
+  }
+  // Clamp data-page-cap to 1000..20000 (default 6000).
+  function parsePageCap(raw) { return Math.min(Math.max(parseInt(raw || "6000", 10) || 6000, 1000), 20000); }
+
   // Build the OpenRouter chat messages array. Page text + retrieved chunks are
   // delimited, untrusted DATA; the system prompt forbids obeying instructions in them.
   function buildMessages(opts) {
@@ -136,6 +179,7 @@
       "When you use a specific page, cite it inline as a Markdown link using exactly the title and URL given for that source, e.g. [Title](URL). Cite only from the provided sources.",
       "Keep answers concise and well formatted in Markdown."
     ].join("\n");
+    if (opts.persona) sys += "\n\nSite guidance from the site owner:\n" + cleanText(opts.persona, 2000);
 
     var ctx = "";
     if (page && page.text) {
@@ -167,7 +211,8 @@
   var INTERNALS = {
     b64url: b64url, makeVerifier: makeVerifier, pkceChallenge: pkceChallenge, randState: randState,
     cleanText: cleanText, tokenize: tokenize, bm25Index: bm25Index, bm25Search: bm25Search,
-    buildMessages: buildMessages, MODELS: MODELS, DEFAULT_MODEL: DEFAULT_MODEL, pickModel: pickModel
+    buildMessages: buildMessages, MODELS: MODELS, DEFAULT_MODEL: DEFAULT_MODEL, pickModel: pickModel,
+    safeHref: safeHref, parseSuggestions: parseSuggestions, parsePageCap: parsePageCap
   };
   // Always expose internals for unit tests (Node: no window -> globalThis).
   G.__btw = INTERNALS;
@@ -187,6 +232,20 @@
   // Never records the authorization code or the key: only presence, lengths-free status and HTTP codes.
   var DBG = [], DBG_EL = null;
   function dbg(line) { DBG.push(new Date().toISOString().slice(11, 19) + "  " + line); if (DBG_EL) DBG_EL.textContent = DBG.join("\n"); }
+
+  // ---- CSP diagnostics: if the HOST page's CSP (header or meta) blocks openrouter.ai, say so instead of a bare
+  // "Failed to fetch". Only the blocked URL's origin and the directive are recorded, never request data.
+  var CSP_BLOCKED = "";
+  try {
+    document.addEventListener("securitypolicyviolation", function (e) {
+      var u = String(e.blockedURI || "");
+      if (/^https:\/\/openrouter\.ai(\/|$)/.test(u)) {
+        CSP_BLOCKED = String(e.effectiveDirective || e.violatedDirective || "connect-src");
+        dbg("CSP blocked openrouter.ai (" + CSP_BLOCKED + ")");
+      }
+    });
+  } catch (e) {}
+  var CSP_HINT = "This site's Content-Security-Policy blocks https://openrouter.ai — the site owner must add it to connect-src.";
 
   // ---- OAuth callback capture: runs immediately on load, BEFORE any UI or asset loading ----
   var CALLBACK = null;
@@ -223,6 +282,12 @@
     selector: (ME && ME.getAttribute("data-context-selector")) || "article, main, [role=main], body",
     defaultModel: (ME && ME.getAttribute("data-default-model")) || DEFAULT_MODEL,
     indexUrl: (ME && ME.getAttribute("data-index")) || "",
+    persona: (ME && ME.getAttribute("data-persona")) || "",
+    exclude: (ME && ME.getAttribute("data-exclude")) || "",
+    pageCap: parsePageCap(ME && ME.getAttribute("data-page-cap")),
+    fabLabel: cleanText((ME && ME.getAttribute("data-fab-label")) || "💬 Ask", 40) || "💬 Ask",
+    greeting: (ME && ME.getAttribute("data-greeting")) || "",
+    suggestions: parseSuggestions(ME && ME.getAttribute("data-suggestions")),
     assetBase: (function () {
       try { var u = new URL(ME.src); return u.href.slice(0, u.href.lastIndexOf("/") + 1); } catch (e) { return "/static/"; }
     })()
@@ -244,26 +309,45 @@
     });
   }
 
+  // Libraries actually used by the widget (set by the loader below). Kept private so a host page that ships its
+  // own (possibly older) marked / DOMPurify is neither used by us nor changed by us.
+  var LIB = { marked: null, DOMPurify: null };
+  var MIN_PURIFY = [3, 2, 4];
+  function purifyOk(dp) {
+    if (!dp || typeof dp.sanitize !== "function" || typeof dp !== "function") return false;
+    var v = String(dp.version || "0").split(".").map(function (x) { return parseInt(x, 10) || 0; });
+    for (var i = 0; i < 3; i++) { if ((v[i] || 0) !== MIN_PURIFY[i]) return (v[i] || 0) > MIN_PURIFY[i]; }
+    return true;
+  }
+
   // Safe Markdown renderer (same approach as the tutor's chat): marked -> DOMPurify, no raw HTML.
+  // DOMPurify hooks are GLOBAL to an instance, so the widget (1) sanitises with its own private instance
+  // (DOMPurify(window) creates a fresh one) and (2) adds its link hook only for the duration of its own
+  // sanitize() call and removes it in finally. Host-page DOMPurify users never see the hook.
+  var SANITIZE_CFG = {
+    ALLOWED_TAGS: ["p", "br", "strong", "em", "code", "pre", "ul", "ol", "li", "blockquote", "a", "h1", "h2", "h3", "h4", "table", "thead", "tbody", "tr", "th", "td", "hr", "span"],
+    ALLOWED_ATTR: ["href", "target", "rel"], FORBID_TAGS: ["img", "svg", "math", "style", "script", "iframe"], FORBID_ATTR: ["style", "onerror", "onload"]
+  };
+  function linkHook(node) {
+    if (node.tagName === "A") {
+      var href = safeHref(node.getAttribute("href"));
+      if (href) node.setAttribute("href", href); else node.removeAttribute("href");
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer nofollow");
+    }
+  }
   function makeRenderer() {
     var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); };
-    if (!window.marked || !window.DOMPurify) return function (s) { return esc(s).replace(/\n/g, "<br>"); };
-    window.marked.setOptions({ gfm: true, breaks: true, headerIds: false, mangle: false });
-    var DP = window.DOMPurify;
-    DP.addHook("afterSanitizeAttributes", function (node) {
-      if (node.tagName === "A") {
-        var href = node.getAttribute("href") || "";
-        if (!/^https?:\/\//i.test(href) && !/^\//.test(href)) { node.removeAttribute("href"); }
-        node.setAttribute("target", "_blank");
-        node.setAttribute("rel", "noopener noreferrer nofollow");
-      }
-    });
+    var MK = LIB.marked, SRC = LIB.DOMPurify;
+    if (!MK || !purifyOk(SRC)) return function (s) { return esc(s).replace(/\n/g, "<br>"); };
+    var DP; try { DP = SRC(window); } catch (e) { DP = null; }
+    if (!DP || typeof DP.sanitize !== "function") return function (s) { return esc(s).replace(/\n/g, "<br>"); };
+    var MD_OPTS = { gfm: true, breaks: true, async: false }; // per call: never mutates the host's marked defaults
     return function (s) {
-      var html = window.marked.parse(String(s || ""));
-      return DP.sanitize(html, {
-        ALLOWED_TAGS: ["p", "br", "strong", "em", "code", "pre", "ul", "ol", "li", "blockquote", "a", "h1", "h2", "h3", "h4", "table", "thead", "tbody", "tr", "th", "td", "hr", "span"],
-        ALLOWED_ATTR: ["href", "target", "rel"], FORBID_TAGS: ["img", "svg", "math", "style", "script", "iframe"], FORBID_ATTR: ["style", "onerror", "onload"]
-      });
+      var html = MK.parse(String(s || ""), MD_OPTS);
+      DP.addHook("afterSanitizeAttributes", linkHook);
+      try { return DP.sanitize(html, SANITIZE_CFG); }
+      finally { DP.removeHook("afterSanitizeAttributes", linkHook); }
     };
   }
 
@@ -274,6 +358,7 @@
     if (!el) el = document.body;
     var clone = el.cloneNode(true);
     clone.querySelectorAll("script,style,noscript,nav,footer,aside,.btw-root,#btw-root").forEach(function (n) { n.remove(); });
+    if (cfg.exclude) { try { clone.querySelectorAll(cfg.exclude).forEach(function (n) { n.remove(); }); } catch (e) {} }
     var txt = clone.innerText || clone.textContent || "";
     return { url: location.pathname, title: document.title || cfg.siteName, text: cleanText(txt, 20000) };
   }
@@ -285,7 +370,9 @@
     var challenge = await pkceChallenge(verifier);
     // localStorage (not sessionStorage) so the verifier survives the return landing in a NEW tab, a Custom
     // Tab or an installed-app context. Short TTL, one-time: deleted the moment the callback reads it.
-    lset(K_PKCE, JSON.stringify({ v: verifier, st: state, t: Date.now(), exp: Date.now() + PKCE_TTL }));
+    // The visitor's not-yet-sent question rides along (one-time, same 10-minute TTL) so it can be put back in the
+    // box even when the return lands in a new tab.
+    lset(K_PKCE, JSON.stringify({ v: verifier, st: state, t: Date.now(), exp: Date.now() + PKCE_TTL, q: (sget(K_PENDQ) || "").slice(0, 2000) }));
     var u = new URL(OR_AUTH);
     u.searchParams.set("callback_url", location.origin + location.pathname);
     u.searchParams.set("code_challenge", challenge);
@@ -328,6 +415,8 @@
       j = await r.json().catch(function () { return {}; });
     } catch (e) {
       dbg("exchange: network error");
+      if (!CSP_BLOCKED) await new Promise(function (r) { setTimeout(r, 60); });
+      if (CSP_BLOCKED) return { ok: false, error: CSP_HINT };
       return { ok: false, error: "Couldn't reach OpenRouter to finish connecting (" + String((e && e.message) || e) + "). Check your connection and tap Connect OpenRouter again." };
     }
     dbg("exchange: HTTP " + r.status + (j && j.key ? " (key received)" : ""));
@@ -337,12 +426,12 @@
     }
     storeKey(j.key, j.user_id);
     dbg("key stored in this tab's sessionStorage" + (lget(K_REMEMBER) === "1" ? " + remembered on this device (7 days)" : ""));
-    return { ok: true };
+    return { ok: true, q: (pk.q && typeof pk.q === "string") ? pk.q.slice(0, 2000) : "" };
   }
   // Kept for tests/back-compat: throws on failure.
   async function exchangeCode(code, state) { var r = await runCallback({ code: code, state: state }); if (!r.ok) throw new Error(r.error); return true; }
   function connected() { return !!sget(K_KEY); }
-  function disconnect() { [K_KEY, K_UID, K_CHAT, K_MODEL].forEach(sdel); ldel(K_PERSIST); ldel(K_REMEMBER); ldel(K_PKCE); }
+  function disconnect() { [K_KEY, K_UID, K_CHAT, K_MODEL, K_PENDQ].forEach(sdel); ldel(K_PERSIST); ldel(K_REMEMBER); ldel(K_PKCE); }
   // Start the code exchange NOW, in parallel with loading the UI assets, so nothing can skip it.
   var EXCHANGE = CALLBACK ? runCallback(CALLBACK) : null;
 
@@ -407,7 +496,7 @@
     render = makeRenderer();
 
     var root = h("div", "btw-root"); root.id = "btw-root";
-    var fab = h("button", "btw-fab"); fab.type = "button"; fab.setAttribute("aria-label", "Open chat"); fab.textContent = "💬 Ask";
+    var fab = h("button", "btw-fab"); fab.type = "button"; fab.setAttribute("aria-label", "Open chat"); fab.textContent = cfg.fabLabel;
     var backdrop = h("div", "btw-backdrop"); backdrop.hidden = true;
 
     var sheet = h("div", "btw-sheet"); sheet.setAttribute("role", "dialog"); sheet.setAttribute("aria-modal", "true");
@@ -441,7 +530,13 @@
 
     sheet.appendChild(grip); sheet.appendChild(head); sheet.appendChild(note); sheet.appendChild(remWrap);
     if (dbgEl) sheet.appendChild(dbgEl);
-    sheet.appendChild(log); sheet.appendChild(form);
+    var chips = h("div", "btw-chips"); chips.setAttribute("aria-label", "Suggested questions");
+    cfg.suggestions.forEach(function (q) {
+      var c = h("button", "btw-chip", q); c.type = "button";
+      c.addEventListener("click", function () { ta.value = q; submit(); });
+      chips.appendChild(c);
+    });
+    sheet.appendChild(log); if (cfg.suggestions.length) sheet.appendChild(chips); sheet.appendChild(form);
     root.appendChild(fab); root.appendChild(backdrop); root.appendChild(sheet);
     document.body.appendChild(root);
 
@@ -496,11 +591,12 @@
             ? "Connected. Replies use YOUR OpenRouter key (billed to you). Remembered on this device for 7 days (localStorage) — untick to forget it."
             : "Connected. Replies use YOUR OpenRouter key (billed to you). Key stays in this tab's sessionStorage only.")
         : "Connect your own OpenRouter account to chat. Your key stays in this tab only (sessionStorage) and you pay for usage.";
-      if (on && !log.childElementCount && !history.length) addMsg("assistant", "Hi! Ask me anything about **" + cfg.siteName + "**. I can use the current page and search the rest of the site.");
+      if (on && !log.childElementCount && !history.length) addMsg("assistant", cfg.greeting || ("Hi! Ask me anything about **" + cfg.siteName + "**. I can use the current page and search the rest of the site."));
+      chips.hidden = history.some(function (m) { return m.role === "user"; });
     }
 
     conn.addEventListener("click", async function () {
-      if (connected()) { disconnect(); history = []; log.innerHTML = ""; refresh(); return; }
+      if (connected()) { disconnect(); history = []; log.innerHTML = ""; chips.hidden = false; refresh(); return; }
       conn.disabled = true; conn.textContent = "Redirecting…";
       try { var url = await prepareAuth(); location.href = url; }
       catch (e) { conn.disabled = false; refresh(); addMsg("assistant", "Could not start the OpenRouter sign-in."); }
@@ -540,24 +636,27 @@
     async function submit() {
       var q = ta.value.trim(); if (!q || busy) return;
       if (!connected()) {
+        sset(K_PENDQ, q.slice(0, 2000));
         addMsg("assistant", "**Connect OpenRouter** first (button at the top of this panel) — then I can answer. Your key stays in this tab only and you pay for usage.");
         conn.classList.add("pulse"); setTimeout(function () { conn.classList.remove("pulse"); }, 2200);
         try { conn.focus(); } catch (e) {}
         return;
       }
       ta.value = ""; busy = true; sendBtn.disabled = true;
-      addMsg("user", q); history.push({ role: "user", content: q }); saveHistory();
+      addMsg("user", q); history.push({ role: "user", content: q }); saveHistory(); chips.hidden = true; sdel(K_PENDQ);
       var bot = addMsg("assistant", "…");
       try {
         await ensureIndex();
         var page = pageContext();
         var hits = INDEX ? bm25Search(INDEX, q + " " + page.title, 4) : [];
-        var msgs = buildMessages({ siteName: cfg.siteName, page: page, retrieved: hits, history: history.slice(0, -1), question: q });
+        var msgs = buildMessages({ siteName: cfg.siteName, persona: cfg.persona, page: page, pageCap: cfg.pageCap, retrieved: hits, history: history.slice(0, -1), question: q });
         var model = sel.value || cfg.defaultModel;
         var full = await streamChat(msgs, model, function (t) { bot.innerHTML = render(t); log.scrollTop = log.scrollHeight; });
         if (!full) { bot.textContent = "(no reply)"; }
         else { bot.innerHTML = render(full); history.push({ role: "assistant", content: full }); saveHistory(); }
       } catch (e) {
+        // A CSP violation event is queued as a task and can arrive just after fetch() rejects: let it land first.
+        if (!CSP_BLOCKED) await new Promise(function (r) { setTimeout(r, 60); });
         bot.innerHTML = render("⚠️ " + friendly(String(e && e.message || e)));
       } finally { busy = false; sendBtn.disabled = false; }
     }
@@ -567,7 +666,7 @@
       history.length = 0;
       EXCHANGE.then(function (res) {
         open();
-        if (res.ok) { refresh(); addMsg("assistant", "✅ **Connected to OpenRouter.** Ask me anything about **" + cfg.siteName + "** — replies are billed to your OpenRouter credits."); }
+        if (res.ok) { var pq = res.q || sget(K_PENDQ); sdel(K_PENDQ); if (pq) ta.value = pq; refresh(); addMsg("assistant", "✅ **Connected to OpenRouter.** Ask me anything about **" + cfg.siteName + "** — replies are billed to your OpenRouter credits."); }
         else { refresh(); addMsg("assistant", "⚠️ " + res.error); }
       });
     }
@@ -577,11 +676,13 @@
       prepareAuth: prepareAuth, exchangeCode: exchangeCode, runCallback: runCallback, connected: connected, disconnect: disconnect,
       exchangeDone: function () { return EXCHANGE ? EXCHANGE.then(function (r) { return r; }) : Promise.resolve(null); },
       ensureIndex: ensureIndex, getIndex: function () { return INDEX; }, render: render,
-      setInput: function (v) { ta.value = v; }, els: { ta: ta, log: log, sel: sel } };
+      setInput: function (v) { ta.value = v; }, els: { ta: ta, log: log, sel: sel, chips: chips, fab: fab }, cfg: cfg,
+      cspBlocked: function () { return CSP_BLOCKED; } };
   }
 
   function friendly(m) {
     m = String(m);
+    if (CSP_BLOCKED && /failed to fetch|networkerror|load failed/i.test(m)) return CSP_HINT;
     if (/401|invalid api key|no auth/i.test(m)) return "OpenRouter didn't accept the key. Disconnect and reconnect.";
     if (/402|credit|insufficient/i.test(m)) return "Your OpenRouter account is out of credits. Add credits or pick a free model.";
     if (/429|rate.?limit/i.test(m)) return "Rate-limited (free models share a pool). Wait a moment or pick another model.";
@@ -591,8 +692,19 @@
   // Boot after styles + libs are present.
   (async function () {
     await loadAsset("link", { rel: "stylesheet", href: cfg.assetBase + "widget.css" });
-    if (!window.marked) await loadAsset("script", { src: cfg.assetBase + "vendor/marked.min.js" });
-    if (!window.DOMPurify) await loadAsset("script", { src: cfg.assetBase + "vendor/purify.min.js" });
+    // DOMPurify: reuse the host's copy only if it is >= 3.2.4 (the widget still makes its OWN instance from it);
+    // otherwise load the vendored one and put back whatever global the host had, so the host keeps its library.
+    // marked: always the vendored copy (a host's marked may be any version/config); the host's global is restored.
+    var prevM = window.marked; if (prevM) window.marked = undefined;
+    await loadAsset("script", { src: cfg.assetBase + "vendor/marked.min.js" });
+    LIB.marked = window.marked && typeof window.marked.parse === "function" ? window.marked : null;
+    if (prevM) window.marked = prevM;
+    LIB.DOMPurify = purifyOk(window.DOMPurify) ? window.DOMPurify : null;
+    if (!LIB.DOMPurify) {
+      var prevP = window.DOMPurify; if (prevP) window.DOMPurify = undefined; await loadAsset("script", { src: cfg.assetBase + "vendor/purify.min.js" });
+      LIB.DOMPurify = purifyOk(window.DOMPurify) ? window.DOMPurify : null; if (prevP) window.DOMPurify = prevP;
+      if (!LIB.DOMPurify) dbg("DOMPurify >= 3.2.4 unavailable: replies render as escaped plain text");
+    }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
   })();

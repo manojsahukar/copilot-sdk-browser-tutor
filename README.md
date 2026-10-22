@@ -133,11 +133,32 @@ It is **page-aware and site-aware**: it sends the current page's visible text (c
         data-index="/site-index.json"></script>
 ```
 
-`data-index` is optional (omit it for current-page-only answers). Build the index at deploy time:
+`data-index` is optional (omit it for current-page-only answers). Optional per-site settings (all plain text; omit for defaults):
+
+| Attribute | What it does | Default |
+|---|---|---|
+| `data-persona` | Extra system-prompt guidance from the site owner (role, tone, safety lines), appended **after** the core grounding/anti-injection rules; ≤ 2000 chars | none |
+| `data-suggestions` | JSON array of ≤ 4 starter questions shown as tappable chips (each ≤ 140 chars); hidden after the first question | none |
+| `data-exclude` | CSS selectors removed from the page text sent to the model, e.g. `"#comments, .giscus, .quiz"` | none (`script, style, noscript, nav, footer, aside` are always removed) |
+| `data-page-cap` | Max characters of current-page text sent (clamped 1000–20000) | 6000 |
+| `data-fab-label` | Floating button text | `💬 Ask` |
+| `data-greeting` | First assistant message after connecting (Markdown, sanitised) | generic greeting |
+| `data-models` | Comma-separated model ids replacing the picker list | curated list incl. `openrouter/free`, `openrouter/auto` |
+
+A question typed **before** connecting is kept (sessionStorage, plus the one-time 10-minute PKCE record) and put back in the box after the OpenRouter sign-in returns, even when the return lands in a new tab. The model default stays `openrouter/free`; *Auto (best available)* and the opt-in 7-day *remember on this device* remain available.
+
+Build the index at deploy time:
 
 ```bash
 node scripts/build-site-index.mjs ./_site --base / --out ./_site/site-index.json
+# Larger sites: whole <main> instead of the first <article>, drop the comments section, cite #section anchors,
+# deterministic bytes (so CI only commits real changes), skip non-content folders:
+node scripts/build-site-index.mjs . --base / --out site-index.json \
+  --prefer main --drop-sections comments --anchors --no-timestamp --skip docs,assets
 ```
+
+The indexer always drops HTML comments, `<script>`/`<style>`, `<nav>`, `<footer>`, `<aside>`, site-chrome `<header>`s
+(`role="banner"` or class `topbar` / `site-header` / `masthead`) and `noindex` pages (redirect stubs).
 
 In **GitHub Actions**, run that step after your static build and before publishing, e.g.:
 
@@ -150,12 +171,55 @@ In **GitHub Actions**, run that step after your static build and before publishi
   with: { path: ./_site }
 ```
 
-The script is dependency-free (plain Node), so no extra `npm install` is needed. Recommended CSP `<meta>` for the host pages:
+The script is dependency-free (plain Node), so no extra `npm install` is needed.
+
+#### Content Security Policy for host sites
+
+The widget needs **no** inline script, inline `style` attribute, `eval` or third-party script, and works under a CSP
+delivered as an HTTP header **or** a `<meta http-equiv>` tag (GitHub Pages can only do the meta). It does not need or
+detect a CSP; if a host's CSP blocks `openrouter.ai`, it tells the visitor ("this site's Content-Security-Policy blocks
+https://openrouter.ai") instead of failing with a bare *Failed to fetch* (`?btw_debug=1` also logs it).
+
+Plain static site (widget only):
 
 ```html
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
 ```
+
+**Static site with Giscus comments** (verified by `scripts/widget-security-e2e.mjs` against the real `giscus.app` client:
+zero CSP violations, Giscus iframe + stylesheet load, the widget chats):
+
+```html
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://giscus.app; style-src 'self' https://giscus.app; img-src 'self' data:; font-src 'self'; connect-src 'self' https://openrouter.ai; frame-src https://giscus.app; object-src 'none'; base-uri 'self'; form-action 'self'">
+```
+
+Why each Giscus source is there: `client.js` is a script from `giscus.app`; it adds `<link rel=stylesheet href="https://giscus.app/default.css">`
+(`style-src`) and an `<iframe src="https://giscus.app/…">` (`frame-src`). Comments, avatars and the GitHub sign-in all
+live **inside** that iframe, so the host needs no `connect-src`/`img-src` for GitHub. Giscus resizes the iframe through
+CSSOM, which `style-src` does not block. Adjust for what the site already uses:
+
+- Google Fonts: add `https://fonts.googleapis.com` to `style-src` and `https://fonts.gstatic.com` to `font-src`.
+- The site's **own** inline `<script>` blocks: prefer moving them to files; otherwise add each block's `'sha256-…'` hash
+  to `script-src`. Never add `'unsafe-inline'` or `'unsafe-eval'` to `script-src`.
+- The site's own inline `style="…"` attributes / `<style>` blocks: move them to CSS files, or (styles only) add
+  `'unsafe-inline'` to `style-src`. The widget and Giscus don't need it.
+- A `frame-src https://github.com` violation means the Giscus `data-repo` / category ids are wrong (fix the config;
+  don't widen the CSP).
+- A meta CSP cannot carry `frame-ancestors`, `report-uri`/`report-to` or `sandbox`; send those as headers where the host
+  allows (GitHub Pages can't). Put the `<meta>` **first** in `<head>`, before any script or stylesheet.
+
+The tutor's own app origin keeps its stricter header CSP (`script-src 'self'; connect-src 'self'`, `frame-ancestors 'none'`); only the
+static `/widget/` pilot pages allow `connect-src https://openrouter.ai`.
+
+**Rendering security.** Replies go through the vendored `marked` and **DOMPurify ≥ 3.2.4** (vendored 3.4.17). The widget
+sanitises with its **own private DOMPurify instance** (`DOMPurify(window)`) and adds its link hook only around its own
+`sanitize()` call (removed in `finally`), so a host page's DOMPurify users never see the hook. If the host already
+loaded an older DOMPurify (< 3.2.4) or its own `marked`, the widget ignores them, loads its vendored copies and restores
+the host's globals. Links survive only as absolute `http(s)://host/…` URLs or same-site root paths (`/page#id`):
+protocol-relative `//host`, `/\host`, other schemes (`javascript:`, `data:`, `mailto:` …), relative paths and anything
+with whitespace/control characters lose their `href`; every kept link gets `target=_blank rel="noopener noreferrer nofollow"`.
 
 ## Observability PoC: agent-editable widgets, metrics, logs and health
 
@@ -261,8 +325,9 @@ node scripts/injection-tests.mjs   # prompt-injection vectors (UA, Referer, cook
 node scripts/openrouter-e2e.mjs    # mocked OpenRouter PKCE: login params, state rejection, exchange, key never exposed, disconnect
 node scripts/markdown-xss.mjs      # model output with <script>/<img onerror>/javascript: links is neutralised (marked + DOMPurify)
 node scripts/xss-lab-e2e.mjs       # XSS lab: payloads fire in vuln variants, blocked in fixed; isolation, frame-ancestors, no URL payloads (needs the lab origin on LAB_PORT)
-node scripts/widget-unit.mjs       # client-side widget: PKCE S256, BM25 retrieval, page-text cleaning, delimited context builder
+node scripts/widget-unit.mjs       # client-side widget: PKCE S256, BM25 retrieval, page-text cleaning, delimited context builder, link filter (safeHref), data-* option parsing
 node scripts/widget-e2e.mjs        # widget pilot: real-touch mobile open/close/reopen (backdrop, Android back), no overflow, 44px targets, pre-connect prompt; mocked connect -> chat (cited) -> disconnect
+node scripts/widget-security-e2e.mjs    # widget: //-link block in the real renderer, DOMPurify hook scoping + host-library isolation, recommended Giscus CSP with the REAL giscus.app client (zero violations), CSP-blocked message, data-* options, unsent question kept across OAuth
 node scripts/widget-oauth-e2e.mjs       # OAuth return in a NEW tab completes; state mismatch / missing / expired / denied all shown; /widget + /widget/index.html; debug trace never leaks; remember opt-in; REAL bogus-code error surfaced
 node scripts/widget-openrouter-live.mjs  # widget against the REAL OpenRouter (no key): auth/keys dummy -> readable 400, chat bogus key -> readable 401, CORS/CSP ok (errors surface, not silent)
 node scripts/widgets-unit.mjs      # widget spec schema (unknown keys, script/URL text, oversize, __proto__), point caps, catalogue, log-template scoping/masking, health maths, per-user isolation
