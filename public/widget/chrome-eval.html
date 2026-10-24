@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="robots" content="noindex">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="/static/widget-page.css"><link rel="stylesheet" href="/static/chrome-eval.css"><title>On-device AI quality check — Tutor Docs</title></head>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/privacy.html">Privacy</a><a href="/">← Back to tutor</a></nav>
+<main>
+<h1>On-device AI quality check</h1>
+<p class="muted">A manual test for Chrome's built-in AI (Prompt API). It asks the on-device model 20 questions about these docs, using the same prompt-building code as the chat widget. You compare each answer with the key facts and mark pass or fail. Everything stays on this device: this page only loads files from this site and makes no other network calls.</p>
+
+<section class="ev-panel" aria-labelledby="ev-env-h">
+<h2 id="ev-env-h">1. This browser</h2>
+<dl class="ev-env">
+<dt>Chrome built-in AI</dt><dd id="ev-support">checking…</dd>
+<dt>Model status</dt><dd id="ev-state">checking…</dd>
+<dt>Browser</dt><dd id="ev-ua">–</dd>
+</dl>
+<p class="ev-warn" id="ev-warn" hidden>⚠️ The on-device model is a one-time download of roughly 3–4 GB and needs about 22 GB of free disk space (desktop Chrome 148+). It starts only when you tap the button below; avoid metered connections. English only.</p>
+<div class="ev-row">
+<button type="button" id="ev-dl" class="ev-btn" hidden>Download on-device model</button>
+<button type="button" id="ev-recheck" class="ev-btn ev-alt">Check again</button>
+</div>
+<div class="ev-bar" id="ev-bar" role="progressbar" aria-label="On-device model download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0 percent" hidden><div class="ev-fill" id="ev-fill"></div></div>
+<p class="muted" id="ev-pct" hidden></p>
+</section>
+
+<section class="ev-panel" aria-labelledby="ev-run-h">
+<h2 id="ev-run-h">2. Run the questions</h2>
+<div class="ev-row">
+<button type="button" id="ev-runall" class="ev-btn" disabled>Run all 20</button>
+<button type="button" id="ev-stop" class="ev-btn ev-alt" disabled>Stop</button>
+<span class="muted" id="ev-status" role="status">Idle</span>
+</div>
+<p class="muted">Each run starts a fresh on-device session, so results do not depend on earlier questions. You can also run questions one at a time below.</p>
+</section>
+
+<section aria-labelledby="ev-list-h">
+<h2 id="ev-list-h">3. Answers and marking</h2>
+<div id="ev-list"></div>
+</section>
+
+<section class="ev-panel" aria-labelledby="ev-out-h">
+<h2 id="ev-out-h">4. Results</h2>
+<p id="ev-summary" class="ev-sum" role="status">0 pass · 0 fail · 20 unrated</p>
+<div class="ev-row">
+<button type="button" id="ev-export" class="ev-btn">Build results text</button>
+<button type="button" id="ev-copy" class="ev-btn ev-alt">Copy</button>
+</div>
+<label for="ev-text" class="muted">Results text (copy it and paste it back to your assistant)</label>
+<textarea id="ev-text" class="ev-text" rows="10" readonly></textarea>
+</section>
+</main></div>
+<script src="/static/widget.js" data-no-ui="1"></script>
+<script src="/static/chrome-eval.js"></script>
+</body></html>

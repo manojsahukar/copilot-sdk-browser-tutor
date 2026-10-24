@@ -11,6 +11,8 @@
 <p>The current page's text and the retrieved site excerpts are wrapped in explicit delimiters and stripped of control characters before being sent, and the system prompt tells the model to treat them as data, not instructions. This reduces prompt-injection from page content.</p>
 <h2>Where things are stored</h2>
 <p>Your key, chosen model and chat history live in this tab's <code>sessionStorage</code> and are gone when the tab closes. The only localStorage entries are a one-time sign-in verifier (deleted on return, 10-minute cap) and, only if you opt in, a 7-day remembered key. See <a href="/widget/storage.html">where your key lives</a> for the exact key names.</p>
+<h2>Chrome on-device option (pilot)</h2>
+<p>In desktop Chrome with built-in AI, you can pick “Chrome On-device” in the provider picker. The model then runs on your own device: your question and the page text are not sent to any model server, and there is no key or sign-in. The one-time model download is several gigabytes and starts only when you tap the download button. This site's <code>site-index.json</code> is still fetched from this site's own origin, and it is English only.</p>
 </article></div>
-<script src="/static/widget.js" data-site-name="Tutor Docs" data-providers="openrouter,huggingface" data-hf-client-id="bb10112f-2b6d-415b-a6ca-e71957dd0d8e" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json"></script>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-providers="openrouter,huggingface,chrome" data-hf-client-id="bb10112f-2b6d-415b-a6ca-e71957dd0d8e" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json"></script>
 </body></html>

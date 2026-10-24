@@ -161,6 +161,7 @@ function metricsRateOk(sid, max = 240) {
 // This mirrors the page's own <meta> CSP (on real GitHub Pages only the meta applies — a host that
 // can't set headers; here we also send it as a header, with frame-ancestors, as defence in depth).
 const WIDGET_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const EVAL_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const turnLog = new Map();
 function rateOk(sid) {
   const now = Date.now(); const arr = (turnLog.get(sid) || []).filter((t) => now - t < 3600e3);
@@ -262,6 +263,9 @@ async function handle(req, res) {
   // Served as plain files; the widget makes ZERO calls back to this server (it talks straight to OpenRouter).
   if (p === "/widget") return redirect(res, "/widget/" + url.search); // keep ?code&state on the OAuth return
   if (p === "/widget/") return serveStatic(res, "widget/index.html", { "Content-Security-Policy": WIDGET_CSP });
+  // Manual on-device (Chrome built-in AI) quality-check page: same-origin only, no third-party connect-src at all.
+  if (p === "/widget/chrome-eval" || p === "/widget/chrome-eval/") return serveStatic(res, "widget/chrome-eval.html", { "Content-Security-Policy": EVAL_CSP });
+  if (p === "/widget/chrome-eval.html") return serveStatic(res, "widget/chrome-eval.html", { "Content-Security-Policy": EVAL_CSP });
   if (p.startsWith("/widget/")) return serveStatic(res, p.slice(1), p.endsWith(".html") ? { "Content-Security-Policy": WIDGET_CSP } : {});
 
   if (p === "/api/config") return send(res, 200, { devBypass: cfg.devBypass, oauthConfigured: oauthConfigured(), sibling: cfg.siblingUrl || null });

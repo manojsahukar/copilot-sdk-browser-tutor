@@ -34,6 +34,7 @@
 @media (min-width: 560px) { .btw-sheet { right: 16px; left: auto; bottom: 16px; border-radius: 16px; } }
 @media (prefers-color-scheme: light) { .btw-sheet { background: #fff; color: #1b1f24; } .btw-assistant { background: #f3f5f8; border-color: #e3e7ec; } .btw-note { background: #f7f9fb; color: #5b6676; border-color: #eceff3; } .btw-composer, .btw-head { background: #fafbfc; } .btw-input, .btw-model { background: #fff; color: #1b1f24; } }
 .btw-remember { display: flex; gap: 8px; align-items: flex-start; padding: 6px 12px 8px; font-size: 11.5px; line-height: 1.4; color: #9aa7b4; background: #0c1016; border-bottom: 1px solid #1a212b; cursor: pointer; }
+.btw-remember[hidden] { display: none; }
 .btw-remember input { margin-top: 2px; width: 16px; height: 16px; flex: 0 0 auto; }
 .btw-debug { margin: 0; max-height: 120px; overflow: auto; padding: 6px 12px; font: 11px/1.45 ui-monospace, Menlo, monospace; color: #7ee787; background: #05080c; border-bottom: 1px solid #1a212b; white-space: pre-wrap; }
 @media (prefers-color-scheme: light) { .btw-remember { background: #f7f9fb; color: #5b6676; } }
@@ -55,3 +56,15 @@
 .btw-prov-b.linked::after { content: " ✓"; color: #7ee787; }
 .btw-prov-b:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
 @media (prefers-color-scheme: light) { .btw-prov { background: #f7f9fb; border-color: #eceff3; } .btw-prov-l { color: #5b6676; } .btw-prov-b { background: #fff; color: #1b1f24; border-color: #d0d7de; } .btw-prov-b.on { background: #dbeafe; color: #0b3d91; border-color: #1f6feb; } }
+/* Chrome on-device (pilot): download warning + progress (only rendered when a site opts in to "chrome") */
+.btw-conn:disabled { opacity: .75; cursor: default; }
+.btw-dl { padding: 8px 12px; background: #0c1016; border-bottom: 1px solid #1a212b; }
+.btw-dl[hidden] { display: none; }
+.btw-dl-warn { margin: 0; font-size: 12px; line-height: 1.45; color: #f0c674; }
+.btw-dl-bar { margin-top: 8px; height: 10px; border-radius: 999px; background: #21262d; overflow: hidden; }
+.btw-dl-bar[hidden], .btw-dl-pct[hidden] { display: none; }
+.btw-dl-fill { height: 100%; width: 0; background: #1f6feb; transition: width .2s ease; }
+.btw-dl-pct { margin-top: 4px; font-size: 12px; color: #9aa7b4; }
+.btw-msg .btw-chip { margin-top: 8px; display: inline-block; }
+@media (prefers-reduced-motion: reduce) { .btw-dl-fill { transition: none; } }
+@media (prefers-color-scheme: light) { .btw-dl { background: #f7f9fb; border-color: #eceff3; } .btw-dl-warn { color: #7a4b00; } .btw-dl-bar { background: #e3e7ec; } .btw-dl-pct { color: #5b6676; } }

@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(new URL("../public", import.meta.url).pathname);
-const PORT = 8091, BASE = `http://127.0.0.1:${PORT}`;
+const PORT = Number(process.env.E2E_PORT || 8091), BASE = `http://127.0.0.1:${PORT}`;
 const MOCK_KEY = "mock-key-not-real-0000";
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, authorization, http-referer, x-title", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 
