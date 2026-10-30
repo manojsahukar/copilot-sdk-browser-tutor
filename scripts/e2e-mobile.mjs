@@ -44,6 +44,10 @@ for (const vp of VPS) {
     await p.screenshot({ path: g });
     if (vp.name === "390x844") { await p.click("#expandAll"); await p.screenshot({ path: g.replace("mobile.png", "mobile-expanded.png"), fullPage: true }); }
   }
+  await p.goto(BASE + "/architecture", { waitUntil: "networkidle0" });
+  const svgs = await p.$$eval("svg.diagram[role=img]", (d) => d.filter((s) => s.querySelector("title") && s.querySelector("desc")).length);
+  results.push({ vp: vp.name, page: "architecture", diagrams: svgs, ...(await metrics(p)) });
+  if (SHOTS && vp.name === "390x844") await p.screenshot({ path: `${SHOTS}architecture.png` });
   await p.goto(BASE + "/", { waitUntil: "networkidle0" });
   if (local) { await p.click("#devLogin"); await p.waitForNavigation({ waitUntil: "networkidle0" }); }
   else {

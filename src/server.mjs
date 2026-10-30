@@ -254,6 +254,7 @@ async function handle(req, res) {
 
   if (p === "/") return serveStatic(res, sess ? "app.html" : "index.html");
   if (p === "/gotchas" || p === "/gotchas/") return serveStatic(res, "gotchas.html");
+  if (p === "/architecture" || p === "/architecture/") return serveStatic(res, "architecture.html");
   if (p === "/demos" || p === "/demos/") return serveStatic(res, "demos.html");
   if (p === "/api/gotchas") return send(res, 200, GOTCHAS);
   if (p === "/api/demos") return send(res, 200, { demos: DEMO_IDS.map((id) => DEMOS[id]), sibling: cfg.siblingUrl || null, lab: cfg.labUrl || null });

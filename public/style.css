@@ -311,3 +311,32 @@ summary .status{margin-left:6px}
 .board-asks .chip,#metricPresets .chip{border:1px solid #30363d;border-radius:999px;background:#161b22;min-height:36px;padding:6px 12px}
 .wboard{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
 @media (min-width:900px){.wboard{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* architecture diagrams (inline SVG; colours via classes because CSP is style-src 'self') */
+.arch-toc{display:flex;flex-wrap:wrap;gap:4px 8px;margin:0 0 8px}
+.arch-toc a{display:inline-flex;align-items:center;min-height:44px;padding:0 10px;border:1px solid #30363d;border-radius:8px;background:#161b22;text-decoration:none}
+figure.arch{margin:24px 0 32px;padding:12px;background:#0d1117;border:1px solid #30363d;border-radius:10px;scroll-margin-top:110px}
+figure.arch figcaption h2{margin:.2em 0 .2em;font-size:1.15rem}
+figure.arch figcaption p{margin:0 0 10px}
+svg.diagram{display:block;width:100%;max-width:560px;height:auto;margin:0 auto}
+svg.diagram .d-box{fill:#161b22;stroke:#30363d;stroke-width:1.5}
+svg.diagram .k-you{stroke:#58a6ff}svg.diagram .k-edge{stroke:#a371f7}svg.diagram .k-gate{stroke:#f78166}
+svg.diagram .k-app{stroke:#3fb950}svg.diagram .k-key{stroke:#d29922}svg.diagram .k-3p{stroke:#8b949e}
+svg.diagram .k-side{stroke:#30363d;stroke-dasharray:5 4}svg.diagram .k-warn{stroke:#f85149;stroke-dasharray:4 3}
+svg.diagram .d-t{fill:#e6edf3;font:600 13.5px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+svg.diagram .d-s{fill:#c9d1d9;font:12.5px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+svg.diagram .d-l{fill:#8b949e;font:italic 12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+svg.diagram .d-z{fill:#8b949e;font:700 11px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;letter-spacing:.04em}
+svg.diagram .d-a{stroke:#8b949e;stroke-width:1.6;fill:none}svg.diagram .d-dash{stroke-dasharray:5 4}
+svg.diagram .d-ah{fill:#8b949e}
+svg.diagram .d-zone{fill:none;stroke-width:1.5;stroke-dasharray:7 5}
+svg.diagram .z-you{stroke:#58a6ff}svg.diagram .z-edge{stroke:#a371f7}svg.diagram .z-aws{stroke:#3fb950}svg.diagram .z-3p{stroke:#8b949e}
+details.alt{margin-top:10px}details.alt summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:#58a6ff}
+details.alt ol{margin:.4em 0 0;padding-left:1.3em}details.alt li{margin:.3em 0}
+.table-wrap{overflow-x:auto}
+table.threats{width:100%;border-collapse:collapse;font-size:.95rem}
+table.threats th,table.threats td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid #30363d}
+table.threats thead th{color:#e6edf3;background:#161b22}
+table.threats tbody th{font-weight:600;color:#e6edf3;width:42%}
+@media (max-width:480px){table.threats,table.threats tbody,table.threats tr,table.threats th,table.threats td{display:block;width:100%}
+  table.threats thead{display:none}table.threats tbody th{width:auto;border-bottom:0;padding-bottom:2px}table.threats td{padding-top:0;color:#c9d1d9}}

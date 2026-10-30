@@ -85,8 +85,10 @@ Browser ──HTTPS──> CloudFront ──(X-Origin-Verify secret header)─�
 ## Security notes
 
 This project is itself a worked example of building an agent safely. The **[`/gotchas`](https://copilot-sdk.demo.curiosta.com/gotchas)**
-page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 22 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
-Accepted / Needs human) and a pointer to the code that handles each. Highlights:
+page (source: [`src/gotchas.mjs`](src/gotchas.mjs)) lists 23 pitfalls of the Copilot SDK with a **status** (Fixed / Mitigated /
+Accepted / Needs human) and a pointer to the code that handles each. The
+**[`/architecture`](https://copilot-sdk.demo.curiosta.com/architecture)** page has four inline-SVG diagrams (request flow,
+sign-in and tokens, the agent's tool loop, trust boundaries) plus a threat-to-control table. Highlights:
 
 - **No model-generated JavaScript.** The model only returns text; live demos use a `run_demo` **enum** that maps a demo *name*
   to pre-written, reviewed client code. Model Markdown is rendered with a vendored, self-hosted parser (`marked`) and sanitized with
@@ -433,7 +435,7 @@ gitignored `.deploy-secrets` or are looked up at deploy time. They are never com
 ```
 src/        server.mjs (routing, OAuth, sessions, origin lockdown, chat SSE), agent.mjs (SDK wiring, tools,
             refresh, sanitation, observability tools), widgets.mjs (spec schema), metrics.mjs (catalogue, CloudWatch/Logs/DynamoDB), health.mjs (/readyz), scrub.mjs, openrouter.mjs (OAuth PKCE + BYOK provider), appsecrets.mjs, serverview.mjs, prompt.mjs, gotchas.mjs, demos.mjs
-public/     static UI (index/app/demos/gotchas .html, probe.js, demos.js, chat.js, render.js, style.css)
+public/     static UI (index/app/demos/gotchas/architecture .html, probe.js, demos.js, chat.js, render.js, style.css)
             widget.js + widget.css + widget/ (client-side OpenRouter chat widget pilot, site-index.json)
 deploy/     template.yaml (SAM, incl. metrics table + pinger), pinger/, cert-template.yaml, build.sh, deploy.sh, run.sh
 scripts/    unit-tests, injection-tests, e2e-*
