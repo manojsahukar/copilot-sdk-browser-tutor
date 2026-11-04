@@ -14,6 +14,7 @@ const SSE = [
   'data: {"choices":[{"delta":{"content":"[Where your OpenRouter key lives](/widget/storage.html)."}}]}',
   "data: [DONE]", "",
 ].join("\n\n");
+const SSE_TEXT = SSE.split("\n\n").filter((l) => l.startsWith("data: {")).map((l) => JSON.parse(l.slice(6)).choices[0].delta.content).join("");
 
 const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", headless: "new", args: ["--no-sandbox"] });
 let fail = 0;
@@ -87,7 +88,12 @@ p.on("request", (req) => {
   if (u.startsWith("https://openrouter.ai/")) {
     if (req.method() === "OPTIONS") return req.respond({ status: 204, headers: CORS, body: "" });
     if (u === "https://openrouter.ai/api/v1/auth/keys") return req.respond({ status: 200, contentType: "application/json", headers: CORS, body: JSON.stringify({ key: "sk-or-v1-MOCKKEY0000", user_id: "mock-user" }) });
-    if (u === "https://openrouter.ai/api/v1/chat/completions") { try { chatModels.push(JSON.parse(req.postData() || "{}").model); } catch (e) {} return req.respond({ status: 200, contentType: "text/event-stream", headers: CORS, body: SSE }); }
+    if (u === "https://openrouter.ai/api/v1/chat/completions") {
+      let body = {}; try { body = JSON.parse(req.postData() || "{}"); } catch (e) {} chatModels.push(body.model);
+      // /widget/ opts in to page tools (data-tools="page"), which sends non-streaming requests: answer with plain JSON.
+      if (body.stream === false) return req.respond({ status: 200, contentType: "application/json", headers: CORS, body: JSON.stringify({ choices: [{ message: { role: "assistant", content: SSE_TEXT } }] }) });
+      return req.respond({ status: 200, contentType: "text/event-stream", headers: CORS, body: SSE });
+    }
     return req.respond({ status: 200, headers: CORS, body: "" });
   }
   return req.continue();

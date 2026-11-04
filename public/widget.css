@@ -68,3 +68,9 @@
 .btw-msg .btw-chip { margin-top: 8px; display: inline-block; }
 @media (prefers-reduced-motion: reduce) { .btw-dl-fill { transition: none; } }
 @media (prefers-color-scheme: light) { .btw-dl { background: #f7f9fb; border-color: #eceff3; } .btw-dl-warn { color: #7a4b00; } .btw-dl-bar { background: #e3e7ec; } .btw-dl-pct { color: #5b6676; } }
+/* Opt-in page tools (data-tools="page"): one trace bubble per tool call. Plain text only. */
+.btw-tool { align-self: flex-start; max-width: 92%; font-size: 13px; background: #0f1a12; border: 1px dashed #2ea043; color: #c9d1d9; border-radius: 10px; }
+.btw-tool-h { font-weight: 600; color: #3fb950; }
+.btw-tool-a { display: block; margin: 4px 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: #0b0f14; padding: 4px 6px; border-radius: 6px; }
+.btw-tool-r { overflow-wrap: anywhere; } .btw-tool-err { color: #f85149; }
+@media (prefers-color-scheme: light) { .btw-tool { background: #f0fbf2; color: #1b1f24; border-color: #1a7f37; } .btw-tool-h { color: #1a7f37; } .btw-tool-a { background: #fff; } .btw-tool-err { color: #cf222e; } }

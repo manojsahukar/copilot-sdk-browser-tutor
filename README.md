@@ -264,6 +264,13 @@ the host's globals. Links survive only as absolute `http(s)://host/…` URLs or 
 protocol-relative `//host`, `/\host`, other schemes (`javascript:`, `data:`, `mailto:` …), relative paths and anything
 with whitespace/control characters lose their `href`; every kept link gets `target=_blank rel="noopener noreferrer nofollow"`.
 
+
+### Page tools (opt-in): `data-tools="page"`
+
+The widget can let the model change something on the page. Add `data-tools="page"` to the widget script tag and set `window.btwPageTools` to an array of `{ name, description, inputSchema, execute(input) }` (the WebMCP tool shape). With OpenRouter, the widget sends them as OpenAI-style `tools`, runs the returned `tool_calls` in the page, shows each call (name, arguments, result) in the chat as plain text, sends the results back and shows the final reply. Max 4 tool rounds, 8 calls per round. Nothing is evaluated: each tool validates its own input. Without the attribute the widget is unchanged (streaming, no `tools` key).
+
+Demo: `/widget/` has a color picker (`public/widget/color-tools.js`) with `set_color`, `get_color` and `reset_color`. The same tools are registered for outside browser assistants with WebMCP (`document.modelContext.registerTool`, feature-detected, `navigator.modelContext` as an old-build fallback). To try WebMCP locally: Chrome 146+, `chrome://flags/#enable-webmcp-testing`, relaunch. Tests: `node scripts/widget-tools-unit.mjs`, `node scripts/widget-tools-e2e.mjs http://localhost:PORT`.
+
 ## Observability PoC: agent-editable widgets, metrics, logs and health
 
 A proof of concept for an **Observability Agent**. The tutor can **draw and edit live charts in the chat**, answer
