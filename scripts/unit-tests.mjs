@@ -99,6 +99,13 @@ console.log("sign-in allow list (ALLOWED_LOGINS)");
   ok("'foo*bar' is ignored", () => { assert.ok(!isLoginAllowed(L, "foobar")); assert.ok(!isLoginAllowed(L, "fooxbar")); assert.ok(!isLoginAllowed(L, "bar")); });
   ok("unsafe patterns log a warning each", () => assert.equal(warns.length, 4));
   ok("parsed sizes", () => { assert.equal(L.exact.size, 2); assert.deepEqual(L.suffixes, ["_seemu"]); });
+  { const S = parseAllowList("manojsahukar,engineerdeepak,*_seemu,*_secorp", () => {});
+    ok("secorp suffix match", () => assert.ok(isLoginAllowed(S, "jdoe_secorp")));
+    ok("'secorp' alone does not match", () => assert.ok(!isLoginAllowed(S, "secorp")));
+    ok("'x-secorp' does not match", () => assert.ok(!isLoginAllowed(S, "x-secorp")));
+    ok("seemu still matches with secorp added", () => assert.ok(isLoginAllowed(S, "sesa736701_seemu")));
+    ok("exact users still allowed", () => assert.ok(isLoginAllowed(S, "manojsahukar") && isLoginAllowed(S, "engineerdeepak")));
+    ok("two suffixes parsed", () => assert.deepEqual(S.suffixes, ["_seemu", "_secorp"])); }
 }
 
 console.log("copilot session auth: provider only (SDK: gitHubToken and gitHubTokenProvider are mutually exclusive)");
