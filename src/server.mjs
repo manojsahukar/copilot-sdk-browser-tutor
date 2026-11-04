@@ -16,6 +16,7 @@ import { scrubTokens } from "./scrub.mjs";
 import { validateSpec } from "./widgets.mjs";
 import { resolveData, recordTurn, recordWeb, userHash, setUserKey, METRICS, ENDPOINTS } from "./metrics.mjs";
 import { readiness } from "./health.mjs";
+import { parseAllowList, isLoginAllowed } from "./logins.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "..", "public");
@@ -27,7 +28,7 @@ const cfg = {
   baseUrl: (process.env.BASE_URL || "http://localhost:8080").replace(/\/$/, ""),
   devBypass: process.env.DEV_AUTH_BYPASS === "1",
   maxTurnsPerHour: Number(process.env.MAX_TURNS_PER_HOUR || 30),
-  allowedLogins: (process.env.ALLOWED_LOGINS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  allowedLogins: parseAllowList(process.env.ALLOWED_LOGINS),
   siblingHost: (process.env.SIBLING_HOST || "").toLowerCase(),
   siblingUrl: (process.env.SIBLING_URL || "").replace(/\/$/, ""),
   siblingPort: Number(process.env.SIBLING_PORT || 0),
@@ -296,7 +297,7 @@ async function handle(req, res) {
     if (!tr.access_token) return send(res, 400, "OAuth exchange failed: " + scrubTokens(tr.error_description || tr.error || "unknown"), "text/plain");
     const u = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${tr.access_token}`, "User-Agent": "browser-tutor" } }).then((r) => r.json());
     if (!u.login) return send(res, 400, "Could not read GitHub user", "text/plain");
-    if (cfg.allowedLogins.length && !cfg.allowedLogins.includes(u.login.toLowerCase())) return send(res, 403, "This PoC is limited to invited GitHub accounts.", "text/plain");
+    if (cfg.allowedLogins.enforced && !isLoginAllowed(cfg.allowedLogins, u.login)) return send(res, 403, "This PoC is limited to invited GitHub accounts.", "text/plain");
     const now = Date.now();
     const cap = now + cfg.sessionCapDays * 86400e3; // session cap (gotcha 5): 7 days; access token refreshed underneath
     const atExp = now + (tr.expires_in ? tr.expires_in * 1000 : 8 * 3600e3);

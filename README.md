@@ -358,6 +358,22 @@ log templates site-wide; everyone else is forced to their own rows.
 (≈ $0.00, ≤ $0.05 without it); the EventBridge schedule is free; GetMetricData $0.01/1k metrics with 60 s caching ≈ cents; Logs Insights $0.005/GB
 scanned on a 7-day-retention group ≈ <$0.01. **No Route 53 health checks ($0.50–0.75 each), no Synthetics (~$10/month), no alarms.**
 
+### Who can sign in: `ALLOWED_LOGINS`
+
+`ALLOWED_LOGINS` is a comma-separated list of GitHub logins. Case does not matter.
+
+- A plain entry must match the whole login. Example: `manojsahukar`.
+- An entry that starts with `*` matches the end of the login. Example: `*_seemu` lets in `sesa736701_seemu`
+  and any other login that ends with `_seemu`. The login must have at least one character before `_seemu`,
+  so `_seemu` alone does not get in.
+- The app ignores a bare `*` and a `*` in any other place (such as `foo*bar`), and writes a warning to the log
+  at startup. This stops a typo from opening the app to everyone. If every entry is ignored, nobody can sign in.
+- If `ALLOWED_LOGINS` is empty, any GitHub account can sign in.
+
+Example: `ALLOWED_LOGINS=manojsahukar,engineerdeepak,*_seemu`
+
+`OBS_ADMIN_LOGINS` (who can see site-wide logs) takes exact logins only. It does not accept `*` rules.
+
 ## Run locally
 
 ```bash

@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf, validateFollowups, _toolsForTest } from "../src/agent.mjs";
+import { parseAllowList, isLoginAllowed } from "../src/logins.mjs";
 import { LAB_LESSONS } from "../src/demos.mjs";
 import { makeVerifier, challengeFor, buildProvider, isAllowedModel, OR_BASE_URL, OR_DEFAULT_MODEL, OR_MODELS, OR_KEY_RE } from "../src/openrouter.mjs";
 
@@ -82,6 +83,22 @@ console.log("run_demo: xss_lab lessons are names from an enum, never code");
   ok("unknown lesson rejected", () => assert.equal(r3.error, "unknown lesson"));
   const r4 = await rd.handler({ demo: "camera", lesson: "links" });
   ok("lesson ignored for non-lab demos", () => assert.equal(r4.lesson, undefined));
+}
+
+console.log("sign-in allow list (ALLOWED_LOGINS)");
+{
+  const warns = []; const L = parseAllowList("manojsahukar, EngineerDeepak,*_seemu,*,foo*bar,**x,a*", (m) => warns.push(m));
+  ok("exact match", () => assert.ok(isLoginAllowed(L, "manojsahukar")));
+  ok("exact match is case-insensitive", () => { assert.ok(isLoginAllowed(L, "ManojSahukar")); assert.ok(isLoginAllowed(L, "engineerdeepak")); });
+  ok("suffix match", () => assert.ok(isLoginAllowed(L, "sesa736701_seemu")));
+  ok("suffix match is case-insensitive", () => assert.ok(isLoginAllowed(L, "Ab_SEEMU")));
+  ok("'_seemu' alone does not match", () => assert.ok(!isLoginAllowed(L, "_seemu")));
+  ok("'x_seemuX' does not match", () => assert.ok(!isLoginAllowed(L, "x_seemuX")));
+  ok("unlisted login does not match", () => { assert.ok(!isLoginAllowed(L, "stranger")); assert.ok(!isLoginAllowed(L, "")); });
+  ok("bare '*' is ignored (not open to all)", () => { assert.ok(!isLoginAllowed(parseAllowList("*", () => {}), "anyone")); assert.equal(parseAllowList("*", () => {}).size, 0); assert.ok(parseAllowList("*", () => {}).enforced, "a list of only bad patterns must still be enforced (nobody gets in)"); assert.ok(!parseAllowList("", () => {}).enforced); });
+  ok("'foo*bar' is ignored", () => { assert.ok(!isLoginAllowed(L, "foobar")); assert.ok(!isLoginAllowed(L, "fooxbar")); assert.ok(!isLoginAllowed(L, "bar")); });
+  ok("unsafe patterns log a warning each", () => assert.equal(warns.length, 4));
+  ok("parsed sizes", () => { assert.equal(L.exact.size, 2); assert.deepEqual(L.suffixes, ["_seemu"]); });
 }
 
 console.log(`\nALL UNIT TESTS PASSED (${pass})`);
