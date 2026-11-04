@@ -247,6 +247,13 @@ function makeTokenProvider(auth) {
   };
 }
 
+// SDK 1.0.22 throws if a session gets both gitHubToken and gitHubTokenProvider ("mutually exclusive").
+// The provider alone gives the first token and later refreshes, so pass only the provider.
+export function copilotAuthConfig(auth) {
+  return auth && auth.token ? { gitHubTokenProvider: makeTokenProvider(auth) } : {};
+}
+export const _makeTokenProviderForTest = (auth) => makeTokenProvider(auth);
+
 async function buildSession(client, sess) {
   const ctx = { fingerprint: null, serverView: null, demoResults: {}, widgets: new Map(), user: { uh: "", admin: false } };
   const auth = { token: sess.token || null, refresh: sess.refresh || null, atExp: sess.atExp || 0 };
@@ -267,7 +274,7 @@ async function buildSession(client, sess) {
     cfg = {
       sessionId: `bt-${sess.sid}-cp`,
       ...(MODEL ? { model: MODEL } : {}),
-      ...(sess.token ? { gitHubToken: sess.token, gitHubTokenProvider: makeTokenProvider(auth) } : {}),
+      ...copilotAuthConfig(auth),
       ...common,
     };
   }

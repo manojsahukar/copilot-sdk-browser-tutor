@@ -1,7 +1,7 @@
 // Fast, offline assertions for the security-critical invariants. Run: node scripts/unit-tests.mjs
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf, validateFollowups, _toolsForTest } from "../src/agent.mjs";
+import { copilotAuthConfig, _makeTokenProviderForTest, clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf, validateFollowups, _toolsForTest } from "../src/agent.mjs";
 import { parseAllowList, isLoginAllowed } from "../src/logins.mjs";
 import { LAB_LESSONS } from "../src/demos.mjs";
 import { makeVerifier, challengeFor, buildProvider, isAllowedModel, OR_BASE_URL, OR_DEFAULT_MODEL, OR_MODELS, OR_KEY_RE } from "../src/openrouter.mjs";
@@ -99,6 +99,18 @@ console.log("sign-in allow list (ALLOWED_LOGINS)");
   ok("'foo*bar' is ignored", () => { assert.ok(!isLoginAllowed(L, "foobar")); assert.ok(!isLoginAllowed(L, "fooxbar")); assert.ok(!isLoginAllowed(L, "bar")); });
   ok("unsafe patterns log a warning each", () => assert.equal(warns.length, 4));
   ok("parsed sizes", () => { assert.equal(L.exact.size, 2); assert.deepEqual(L.suffixes, ["_seemu"]); });
+}
+
+console.log("copilot session auth: provider only (SDK: gitHubToken and gitHubTokenProvider are mutually exclusive)");
+{
+  const c = copilotAuthConfig({ token: "gho_fake", refresh: null, atExp: Date.now() + 8 * 3600e3 });
+  ok("token user gets gitHubTokenProvider", () => assert.equal(typeof c.gitHubTokenProvider, "function"));
+  ok("token user never gets both keys", () => assert.ok(!("gitHubToken" in c)));
+  ok("no token -> no auth keys", () => assert.deepEqual(Object.keys(copilotAuthConfig({ token: null })), []));
+  const r = await c.gitHubTokenProvider({ reason: "initial", host: "https://github.com" });
+  ok("provider returns current token at once with expiresIn > 3600", () => { assert.equal(r.kind, "token"); assert.equal(r.accessToken, "gho_fake"); assert.ok(r.expiresIn > 3600); });
+  const r2 = await _makeTokenProviderForTest({ token: null })({ reason: "initial" });
+  ok("provider cancels when there is no token", () => assert.equal(r2.kind, "cancelled"));
 }
 
 console.log(`\nALL UNIT TESTS PASSED (${pass})`);

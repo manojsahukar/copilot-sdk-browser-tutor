@@ -46,7 +46,7 @@ export const GOTCHAS = [
     status: "fixed",
     what: "With GitHub OAuth, each user's own token is passed to the SDK, so Copilot runs as that user on their own Copilot plan. Supported token types: gho_ (OAuth app), ghu_ (GitHub App user token) and github_pat_ (fine-grained PAT). Classic ghp_ PATs are not supported.",
     risk: "The SDK's auth chain falls back to env tokens (COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN), a stored copilot login and gh CLI credentials. On a server that silently makes every visitor use the operator's Copilot seat (cost, quota, audit and identity all wrong).",
-    app: "The production client uses useLoggedInUser: false and passes gitHubToken (plus a per-session gitHubTokenProvider) on each createSession. The only ambient-credential path is the localhost-only dev bypass, which refuses to start on a non-localhost host and hard-fails at startup if NODE_ENV=production. This build verified the per-user path with a gho_ token.",
+    app: "The production client uses useLoggedInUser: false and gives each createSession a per-session gitHubTokenProvider. The provider returns the user's current token at once and gets a new one before it expires. It does not also pass gitHubToken, because SDK 1.0.22 refuses a session that has both. The only ambient-credential path is the localhost-only dev bypass, which refuses to start on a non-localhost host and hard-fails at startup if NODE_ENV=production. This build verified the per-user path with a gho_ token.",
     fix: "clientFor() useLoggedInUser:false + per-session token/provider (src/agent.mjs); production hard-fail on dev bypass (src/server.mjs).",
     sources: [
       { label: "GitHub OAuth setup (token types)", url: `${SDK}/docs/setup/github-oauth.md` },
