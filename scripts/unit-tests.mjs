@@ -120,4 +120,50 @@ console.log("copilot session auth: provider only (SDK: gitHubToken and gitHubTok
   ok("provider cancels when there is no token", () => assert.equal(r2.kind, "cancelled"));
 }
 
+console.log("atlas evaluation: shape and gotcha cross-links");
+{
+  const { ATLAS_META, ATLAS_APPLICABLE, ATLAS_NOT_APPLICABLE, ATLAS_EVAL } = await import("../src/atlas.mjs");
+  const { GOTCHAS } = await import("../src/gotchas.mjs");
+  const gotchaIds = new Set(GOTCHAS.map((g) => g.id));
+  ok("ATLAS meta has version 2026.10", () => {
+    assert.equal(ATLAS_META.version, "2026.10");
+    assert.equal(ATLAS_META.modifiedDate, "2026-10-28");
+    assert.ok(ATLAS_META.yamlUrl.includes("ATLAS-2026.10.yaml"));
+  });
+  ok("ATLAS_EVAL bundles meta + lists", () => {
+    assert.equal(ATLAS_EVAL.meta, ATLAS_META);
+    assert.equal(ATLAS_EVAL.applicable, ATLAS_APPLICABLE);
+    assert.equal(ATLAS_EVAL.notApplicable, ATLAS_NOT_APPLICABLE);
+  });
+  ok("applicable list is non-empty and not-applicable is honest", () => {
+    assert.ok(ATLAS_APPLICABLE.length >= 20);
+    assert.ok(ATLAS_NOT_APPLICABLE.length >= 10);
+  });
+  ok("every applicable item has id, official name, tactic, status, sourceUrl", () => {
+    for (const a of ATLAS_APPLICABLE) {
+      assert.match(a.id, /^AML\.T\d+/);
+      assert.ok(a.name);
+      assert.match(a.tacticId, /^AML\.TA\d+/);
+      assert.ok(a.tacticName);
+      assert.ok(["fixed", "mitigated", "accepted", "needs-human"].includes(a.status));
+      assert.ok(a.sourceUrl.includes(a.id));
+      assert.ok(a.apply && a.control && a.residual);
+    }
+  });
+  ok("gotcha cross-links resolve to existing GOTCHAS ids", () => {
+    for (const a of ATLAS_APPLICABLE) {
+      for (const id of a.gotchaIds) assert.ok(gotchaIds.has(id), `missing gotcha ${id} on ${a.id}`);
+    }
+  });
+  ok("technique ids are unique across applicable + not-applicable", () => {
+    const ids = [...ATLAS_APPLICABLE, ...ATLAS_NOT_APPLICABLE].map((a) => a.id);
+    assert.equal(ids.length, new Set(ids).size);
+  });
+  ok("needs-human items are listed", () => {
+    const nh = ATLAS_APPLICABLE.filter((a) => a.status === "needs-human").map((a) => a.id);
+    assert.ok(nh.includes("AML.T0012"));
+    assert.ok(nh.includes("AML.T0010.001"));
+  });
+}
+
 console.log(`\nALL UNIT TESTS PASSED (${pass})`);

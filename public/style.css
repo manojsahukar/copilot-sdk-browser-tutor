@@ -340,3 +340,16 @@ table.threats thead th{color:#e6edf3;background:#161b22}
 table.threats tbody th{font-weight:600;color:#e6edf3;width:42%}
 @media (max-width:480px){table.threats,table.threats tbody,table.threats tr,table.threats th,table.threats td{display:block;width:100%}
   table.threats thead{display:none}table.threats tbody th{width:auto;border-bottom:0;padding-bottom:2px}table.threats td{padding-top:0;color:#c9d1d9}}
+
+/* MITRE ATLAS evaluation on /gotchas */
+.atlas-section{margin-top:36px;padding-top:24px;border-top:1px solid #30363d}
+.atlas-section h2{font-size:1.35rem;margin:0 0 8px;color:#e6edf3}
+.atlas-sub{font-size:1.05rem;margin:20px 0 8px;color:#e6edf3}
+.atlas-counts{margin:8px 0 0}
+.atlas-na-lead{margin:0 0 8px;color:#8b949e;font-size:.95rem}
+.atlas-na{margin:0;padding-left:1.2em}
+.atlas-na li{margin:6px 0;line-height:1.45}
+.atlas-id{font-size:.85em;color:#79c0ff}
+.atlas-gotcha-row{display:flex;flex-wrap:wrap;gap:6px}
+.atlas-gotcha{display:inline-flex;align-items:center;min-height:36px;padding:4px 10px;border-radius:999px;border:1px solid #30363d;background:#0d1117;color:#58a6ff;text-decoration:none;font-size:12px}
+.atlas-gotcha:hover{border-color:#58a6ff}

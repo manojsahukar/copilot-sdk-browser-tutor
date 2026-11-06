@@ -9,6 +9,7 @@ import { getAgent, runTurn } from "./agent.mjs";
 import { serverView } from "./serverview.mjs";
 import { appSecrets, oauthConfigured, refreshGitHubToken } from "./appsecrets.mjs";
 import { GOTCHAS } from "./gotchas.mjs";
+import { ATLAS_EVAL } from "./atlas.mjs";
 import { DEMOS, DEMO_IDS } from "./demos.mjs";
 import { OR_MODELS, OR_DEFAULT_MODEL, OR_REVOKE_URL, OR_KEY_RE, isAllowedModel, makeVerifier, challengeFor, authorizeUrl, exchangeCode, keySettingsUrl } from "./openrouter.mjs";
 import { isLab, handleLab, signLabToken } from "./xsslab.mjs";
@@ -258,6 +259,7 @@ async function handle(req, res) {
   if (p === "/architecture" || p === "/architecture/") return serveStatic(res, "architecture.html");
   if (p === "/demos" || p === "/demos/") return serveStatic(res, "demos.html");
   if (p === "/api/gotchas") return send(res, 200, GOTCHAS);
+  if (p === "/api/atlas") return send(res, 200, ATLAS_EVAL);
   if (p === "/api/demos") return send(res, 200, { demos: DEMO_IDS.map((id) => DEMOS[id]), sibling: cfg.siblingUrl || null, lab: cfg.labUrl || null });
   if (p.startsWith("/static/")) return serveStatic(res, p.slice(8));
 
