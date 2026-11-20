@@ -498,6 +498,25 @@ await ok("sitemap and llms.txt come from the public page list and the real tool 
   assert.match(serverSrc, /script-src 'self'/);
 });
 
+await ok("find_site_page calls respondWith during submit, in the same turn", async () => {
+  let responded = false;
+  const ev = { agentInvoked: true, preventDefault() { this.prevented = true; }, respondWith(p) { responded = true; this.promise = p; } };
+  const out = P.submitSiteFind(ev, "privacy");
+  assert.equal(ev.prevented, true);
+  assert.equal(responded, true);
+  assert.equal(out.responded, true);
+  assert.equal(out.pages[0].path, "/widget/privacy.html");
+  const value = await ev.promise;
+  assert.equal(value.ok, true);
+  assert.equal(value.pages[0].path, "/widget/privacy.html");
+  let human = false;
+  const person = { agentInvoked: false, preventDefault() {}, respondWith() { human = true; } };
+  const plainSubmit = P.submitSiteFind(person, "privacy");
+  assert.equal(human, false);
+  assert.equal(plainSubmit.responded, false);
+  assert.equal(plainSubmit.pages[0].path, "/widget/privacy.html");
+});
+
 await ok("missing paths are 404, protected routes stay 401, and discovery files need no auth", async () => {
   const port = 18765;
   const base = `http://127.0.0.1:${port}`;

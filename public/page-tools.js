@@ -560,26 +560,32 @@
     }
     host.appendChild(list);
   }
-  function replyToAgent(event, value) {
-    if (!event || !event.agentInvoked || typeof event.respondWith !== "function") return;
-    try { event.respondWith(Promise.resolve(value)); } catch (e) {}
+  // respondWith runs in this function, which the submit listener calls before it returns.
+  function submitSiteFind(event, query) {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    var pages = searchPages(query);
+    var trimmed = cap(String(query || ""), 80);
+    var value = {
+      ok: true,
+      message: pages.length ? "Matching public pages." : (trimmed ? "No public page matches those words." : "Type a word from a page title or summary."),
+      pages: pages
+    };
+    var responded = false;
+    if (event && event.agentInvoked && typeof event.respondWith === "function") {
+      event.respondWith(Promise.resolve(value));
+      responded = true;
+    }
+    return { pages: pages, value: value, responded: responded, query: trimmed };
   }
   function bindSiteFind(doc) {
     var form = doc.getElementById ? doc.getElementById("site-find") : null;
     if (!form || form.getAttribute("data-bound") === "1") return;
     form.setAttribute("data-bound", "1");
     form.addEventListener("submit", function (event) {
-      if (event && typeof event.preventDefault === "function") event.preventDefault();
       var input = form.querySelector ? form.querySelector("input[name=q]") : null;
       var host = doc.getElementById("site-find-results");
-      var query = input ? String(input.value || "") : "";
-      var pages = searchPages(query);
-      if (host) fillResults(host, pages, cap(query, 80));
-      replyToAgent(event, {
-        ok: true,
-        message: pages.length ? "Matching public pages." : (cap(query, 80) ? "No public page matches those words." : "Type a word from a page title or summary."),
-        pages: pages
-      });
+      var out = submitSiteFind(event, input ? String(input.value || "") : "");
+      if (host) fillResults(host, out.pages, out.query);
     });
   }
   function namesToList(pageNames, colorNames) {
@@ -619,7 +625,7 @@
     summarizeAtlas: summarizeAtlas, lookupAtlas: lookupAtlas, lookupGotcha: lookupGotcha, architectureGuide: architectureGuide,
     demoCatalog: demoCatalog, demoState: demoState, readPage: readPage, pageGuide: pageGuide, landingGuide: landingGuide,
     markersFrom: markersFrom, specList: specList, createTools: createTools, findModelContext: findModelContext, registerWebMCP: registerWebMCP,
-    statusLine: statusLine, searchPages: searchPages, ATLAS_STATUS: ATLAS_STATUS
+    statusLine: statusLine, searchPages: searchPages, submitSiteFind: submitSiteFind, ATLAS_STATUS: ATLAS_STATUS
   };
   if (!HAS_DOM) return;
 

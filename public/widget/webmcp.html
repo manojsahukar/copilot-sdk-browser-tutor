@@ -39,7 +39,7 @@
 <p>The widget home page also has a color form named <code>set_color_form</code>. It uses the same color check as <code>set_color</code>. You can type a hex color or an allowed color name, or use the picker. The picker and the text box each have a label and a name.</p>
 
 <h2>A person confirms a color change</h2>
-<p>If an assistant submits the color form, the page does not change the swatch yet. It shows Confirm and Cancel on the page. Confirm applies the color. Cancel leaves the swatch as it is. The page does not use a browser alert box.</p>
+<p>If an assistant submits the color form, the page answers that call immediately and does not change the swatch yet. It shows Confirm and Cancel on the page. Confirm applies the color and sends that color back. Cancel, leaving the page, or waiting about two minutes sends "Cancelled by the person" and leaves the swatch as it is. The page does not use a browser alert box.</p>
 <p>A direct call to <code>set_color</code> or <code>reset_color</code> still applies at once. Those calls do not show the confirm step. The page marks them so an assistant can see that a color change is the kind of action a person may need to confirm on the form. Read-only tools do not ask for confirmation. The search form is read-only, so an assistant can submit it without a confirm step.</p>
 
 <h2>Why the tutor chat does not go through WebMCP</h2>

@@ -139,31 +139,48 @@
     return { value: input };
   }
   function describe(st) { return { color: st.hex, name: st.name, isDefault: st.hex === DEFAULT }; }
-  // Declarative color form. A person typing or using the picker applies at once.
-  // An assistant submit (event.agentInvoked) only asks for a confirm step. It does not change the swatch here.
-  // A direct set_color or reset_color tool call stays unprompted. The page marks that path separately.
-  function replyToAgent(event, value) {
-    if (!event || !event.agentInvoked || typeof event.respondWith !== "function") return;
-    try { event.respondWith(Promise.resolve(value)); } catch (e) {}
+  // Chrome rejects an agent submit that calls preventDefault() and only calls respondWith() later.
+  // respondWith() must run in the same turn as preventDefault(). The promise may resolve afterwards.
+  function cancelledByPerson() { return { ok: false, error: "Cancelled by the person" }; }
+  function beginAgentReply(event) {
+    var settled = false;
+    var finish = function (value) { return value; };
+    var promise = new Promise(function (resolve) {
+      finish = function (value) {
+        if (settled) return value;
+        settled = true;
+        resolve(value);
+        return value;
+      };
+    });
+    var responded = false;
+    if (event && typeof event.respondWith === "function") {
+      event.respondWith(promise);
+      responded = true;
+    }
+    return { finish: finish, responded: responded, promise: promise };
   }
+  // Declarative color form. A person typing or using the picker applies at once.
+  // An assistant submit (event.agentInvoked) asks for a confirm step and does not change the swatch here.
+  // A direct set_color or reset_color tool call stays unprompted.
   function handleColorFormSubmit(event, ctx) {
     ctx = ctx || {};
     if (event && typeof event.preventDefault === "function") event.preventDefault();
     var color = String(ctx.value == null ? "" : ctx.value).trim();
     if (event && event.agentInvoked) {
+      var gate = beginAgentReply(event);
       var parsed = parseColor(color);
       if (parsed.error) {
         var err = { ok: false, error: parsed.error };
         if (parsed.allowedNames) err.allowedNames = parsed.allowedNames;
-        if (ctx.reply) ctx.reply(event, err);
-        else replyToAgent(event, err);
-        return { confirm: false, changed: false, result: err };
+        gate.finish(err);
+        return { confirm: false, changed: false, result: err, responded: gate.responded, finish: gate.finish };
       }
-      if (ctx.showConfirm) ctx.showConfirm(color, event);
-      return { confirm: true, changed: false };
+      if (ctx.showConfirm) ctx.showConfirm(color, gate.finish);
+      return { confirm: true, changed: false, responded: gate.responded, finish: gate.finish };
     }
     var result = ctx.call("set_color", { color: color }, ctx.source || "You");
-    return { confirm: false, changed: !!(result && result.ok), result: result };
+    return { confirm: false, changed: !!(result && result.ok), result: result, responded: false };
   }
   // Pure: returns { state, result }. Bad input leaves the state as it was.
   function runTool(state, name, input) {
@@ -229,7 +246,7 @@
 
   G.__btwColor = { DEFAULT: DEFAULT, NAMED: NAMED, COLOR_NAMES: COLOR_NAMES, HEX_PATTERN: HEX_PATTERN, COLOR_EXAMPLE: COLOR_EXAMPLE,
     TOOL_SPECS: TOOL_SPECS, parseColor: parseColor, runTool: runTool, annotationsFor: annotationsFor,
-    handleColorFormSubmit: handleColorFormSubmit,
+    handleColorFormSubmit: handleColorFormSubmit, cancelledByPerson: cancelledByPerson,
     createController: createController, toolList: toolList, findModelContext: findModelContext, registerWebMCP: registerWebMCP };
   if (!HAS_DOM) return;
 
@@ -240,7 +257,8 @@
     var sw = host.querySelector(".cp-swatch"), cap = host.querySelector(".cp-caption"), log = host.querySelector(".cp-log"),
       input = host.querySelector(".cp-input"), text = host.querySelector(".cp-text"), status = document.getElementById("webmcp-status");
     var form = host.querySelector("#color-form"), box = host.querySelector("#color-confirm"), msg = host.querySelector("#color-confirm-text"),
-      note = host.querySelector("#color-form-note"), pending = null;
+      note = host.querySelector("#color-form-note"), pending = null, leaveTimer = null;
+    var CONFIRM_WAIT_MS = 120000;
     function paint(st, ev) {
       sw.style.backgroundColor = st.hex;            // CSSOM, allowed under style-src 'self'
       if (input) input.value = st.hex;
@@ -254,12 +272,32 @@
         while (log.children.length > 5) log.removeChild(log.lastChild);
       }
     }
-    function showConfirm(color, event) {
-      pending = { color: color, event: event };
+    function clearWatch() {
+      if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
+      window.removeEventListener("pagehide", onLeave);
+    }
+    function settle(value) {
+      if (!pending) return;
+      var finish = pending.finish;
+      pending = null;
+      clearWatch();
+      if (box) box.hidden = true;
+      finish(value);
+    }
+    function onLeave() {
+      if (!pending) return;
+      if (note) note.textContent = "Cancelled by the person. The color was not changed.";
+      settle(cancelledByPerson());
+    }
+    function showConfirm(color, finish) {
+      if (pending) onLeave();
+      pending = { color: color, finish: finish };
       if (form) form.setAttribute("agentinvoked", "");
       if (msg) msg.textContent = "An assistant wants to set the color to " + color + ". Confirm to apply it. Cancel leaves the swatch as it is.";
       if (box) box.hidden = false;
       if (note) note.textContent = "";
+      window.addEventListener("pagehide", onLeave);
+      leaveTimer = setTimeout(onLeave, CONFIRM_WAIT_MS);
     }
     var ctl = createController(paint);
     paint(ctl.getState());
@@ -269,26 +307,21 @@
     });
     if (form) form.addEventListener("submit", function (event) {
       var color = text ? text.value : (input ? input.value : "");
-      var out = handleColorFormSubmit(event, { value: color, call: ctl.call, showConfirm: showConfirm, reply: replyToAgent });
+      var out = handleColorFormSubmit(event, { value: color, call: ctl.call, showConfirm: showConfirm });
       if (note && out.result && out.result.ok === false) note.textContent = out.result.error;
     });
     var yes = host.querySelector("#color-confirm-yes"), no = host.querySelector("#color-confirm-no");
     if (yes) yes.addEventListener("click", function () {
       if (!pending) return;
-      var color = pending.color, event = pending.event;
-      pending = null;
-      if (box) box.hidden = true;
+      var color = pending.color;
       var result = ctl.call("set_color", { color: color }, "Assistant");
       if (note) note.textContent = result.ok ? "" : result.error;
-      replyToAgent(event, result);
+      settle(result);
     });
     if (no) no.addEventListener("click", function () {
       if (!pending) return;
-      var event = pending.event;
-      pending = null;
-      if (box) box.hidden = true;
-      if (note) note.textContent = "Cancelled. The color was not changed.";
-      replyToAgent(event, { ok: false, error: "The color change was cancelled. The swatch was not changed." });
+      if (note) note.textContent = "Cancelled by the person. The color was not changed.";
+      settle(cancelledByPerson());
     });
     var rb = host.querySelector("button[data-tool=reset_color]");
     if (rb) rb.addEventListener("click", function () { ctl.call("reset_color", {}, "You"); });
