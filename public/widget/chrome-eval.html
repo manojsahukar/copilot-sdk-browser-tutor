@@ -8,6 +8,7 @@
 <main>
 <h1>On-device AI quality check</h1>
 <p class="muted">A manual test for Chrome's built-in AI (Prompt API). It asks the on-device model 20 questions about these docs, using the same prompt-building code as the chat widget. You compare each answer with the key facts and mark pass or fail. Everything stays on this device: this page only loads files from this site and makes no other network calls.</p>
+<p class="muted">A browser assistant can read a short guide to this page. The guide lists headings only. It does not read answers, keys, cookies, or saved chat.</p>
 
 <section class="ev-panel" aria-labelledby="ev-env-h">
 <h2 id="ev-env-h">1. This browser</h2>
@@ -51,6 +52,7 @@
 <textarea id="ev-text" class="ev-text" rows="10" readonly></textarea>
 </section>
 </main></div>
+<script src="/static/page-tools.js"></script>
 <script src="/static/widget.js" data-no-ui="1"></script>
 <script src="/static/chrome-eval.js"></script>
 </body></html>
