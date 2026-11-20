@@ -67,11 +67,29 @@ await ok("every tool is read-only, not consequential, and describes a repeatable
 await ok("pages pick the tools that belong there", () => {
   const names = (m) => plain(P.specList(m).map((s) => s.name));
   assert.deepEqual(names({}), ["get_site_guide"]);
+  assert.deepEqual(names({ landing: true }), ["get_site_guide", "get_landing_guide"]);
   assert.deepEqual(names({ probe: true }), ["get_site_guide", "get_browser_reveal", "get_connection_reveal"]);
   assert.deepEqual(names({ gotchas: true }), ["get_site_guide", "get_atlas_summary", "lookup_atlas_technique", "lookup_gotcha"]);
   assert.deepEqual(names({ architecture: true }), ["get_site_guide", "get_architecture_guide"]);
   assert.deepEqual(names({ demos: true }), ["get_site_guide", "get_demo_catalog", "read_demo_state"]);
   assert.deepEqual(names({ widget: true }), ["get_site_guide", "get_page_guide"]);
+});
+await ok("each tool description says what it returns, and schemas have examples but no default", () => {
+  function noDefault(node, at) {
+    if (!node || typeof node !== "object") return;
+    assert.equal(Object.prototype.hasOwnProperty.call(node, "default"), false, at);
+    for (const k of Object.keys(node)) noDefault(node[k], at + "." + k);
+  }
+  for (const spec of ALL) {
+    assert.match(spec.description, /It returns/);
+    noDefault(spec.inputSchema, spec.name);
+  }
+  assert.equal(P.SPECS.catalog.inputSchema.properties.id.examples[0], "storage_inspector");
+  assert.equal(P.SPECS.arch.inputSchema.properties.section.examples[0], "req");
+  assert.deepEqual(plain(P.SPECS.atlas.inputSchema.properties.status.enum), plain(P.ATLAS_STATUS));
+  assert.match(P.SPECS.atlasOne.description, /id wins if you give both/);
+  assert.match(P.SPECS.gotcha.description, /id wins if you give both/);
+  assert.match(P.SITE_PAGES.find((p) => p.path === "/").summary, /Sign in to see what this browser reveals/);
 });
 await ok("inspector samples succeed for lookup, architecture, and demos", () => {
   const atlasIn = inspectorTemplate(P.SPECS.atlasOne.inputSchema);
@@ -80,14 +98,18 @@ await ok("inspector samples succeed for lookup, architecture, and demos", () => 
   assert.equal(hit.ok, true);
   assert.match(hit.technique.name, /Prompt Injection/);
   assert.equal(hit.technique.id, "AML.T0051");
+  assert.match(hit.note, /id wins if you give both/);
   const gotchaIn = inspectorTemplate(P.SPECS.gotcha.inputSchema);
   const g = P.lookupGotcha(GOTCHAS, gotchaIn);
   assert.equal(g.ok, true);
   assert.equal(g.gotcha.id, "llm-js-xss");
+  assert.match(g.note, /id wins if you give both/);
   const arch = P.architectureGuide(inspectorTemplate(P.SPECS.arch.inputSchema));
   assert.equal(arch.sections[0].id, "req");
+  assert.equal(P.architectureGuide({}).sections.length, 4);
   const demo = P.demoCatalog(inspectorTemplate(P.SPECS.catalog.inputSchema));
   assert.equal(demo.demos[0].id, "storage_inspector");
+  assert.equal(P.demoCatalog({}).demos.length, 7);
   assert.equal(inspectorTemplate(P.SPECS.site.inputSchema) && Object.keys(inspectorTemplate(P.SPECS.site.inputSchema)).length, 0);
 });
 
@@ -99,7 +121,22 @@ await ok("summary counts the public evaluation and does not include exploit step
   assert.equal(s.counts.applicable, ATLAS_EVAL.applicable.length);
   assert.equal(s.counts.notApplicable, ATLAS_EVAL.notApplicable.length);
   assert.equal(s.applicable[0].apply, undefined);
+  assert.equal(s.status, undefined);
   assert.ok(s.counts.mitigated > 0);
+});
+await ok("atlas summary status filter shrinks the result", () => {
+  const all = P.summarizeAtlas(ATLAS_EVAL, {});
+  const fixed = P.summarizeAtlas(ATLAS_EVAL, { status: "fixed" });
+  assert.equal(fixed.ok, true);
+  assert.equal(fixed.status, "fixed");
+  assert.ok(fixed.applicable.length > 0);
+  assert.ok(fixed.applicable.every((row) => row.status === "fixed"));
+  assert.equal(fixed.notApplicable.length, 0);
+  assert.ok(JSON.stringify(fixed).length < JSON.stringify(all).length);
+  const na = P.summarizeAtlas(ATLAS_EVAL, { status: "not-applicable" });
+  assert.equal(na.applicable.length, 0);
+  assert.equal(na.notApplicable.length, ATLAS_EVAL.notApplicable.length);
+  assert.match(P.summarizeAtlas(ATLAS_EVAL, { status: "nope" }).error, /not-applicable/);
 });
 await ok("lookup by words and a missing code", () => {
   const many = P.lookupAtlas(ATLAS_EVAL, { query: "prompt" });
@@ -121,6 +158,18 @@ await ok("gotcha lookup refuses unknown input fields", async () => {
   const good = await gotcha.execute({ id: "llm-js-xss", query: "" });
   assert.equal(good.ok, true);
   assert.equal(good.gotcha.id, "llm-js-xss");
+  assert.equal(good.note, undefined);
+  const both = await gotcha.execute({ id: "llm-js-xss", query: "prompt injection" });
+  assert.equal(both.ok, true);
+  assert.match(both.note, /id wins if you give both/);
+  const typed = await tools.find((t) => t.name === "lookup_atlas_technique").execute({ id: 5 });
+  assert.equal(typed.ok, false);
+  assert.match(typed.error, /id must be text/);
+  const statusType = await tools.find((t) => t.name === "get_atlas_summary").execute({ status: 5 });
+  assert.match(statusType.error, /status must be text/);
+  const statusOk = await tools.find((t) => t.name === "get_atlas_summary").execute({ status: "mitigated" });
+  assert.equal(statusOk.ok, true);
+  assert.ok(statusOk.applicable.every((row) => row.status === "mitigated"));
 });
 
 console.log("Secrets stay out of tool results");
@@ -171,6 +220,17 @@ await ok("demo state reports a boolean and not the on-screen text", () => {
   assert.equal(res.demos[0].onPage, true);
   assert.doesNotMatch(blob, /CHATSECRET999|SECRETKEY999/);
   assert.equal(P.demoState(doc, { id: "not-a-demo" }).ok, false);
+  const loading = { getElementById: (id) => id === "demos" ? { textContent: "loading…" } : null };
+  const pending = P.demoState(loading, {});
+  assert.equal(pending.loading, true);
+  assert.match(pending.message, /still loading/);
+  assert.ok(pending.demos.length === 7 && pending.demos.every((d) => d.onPage === "still loading"));
+  const lab = { getElementById: (id) => id === "xsslab" || id === "demo-xss_lab" || id === "demos" ? { textContent: "" } : null };
+  const labState = P.demoState(lab, { id: "xss_lab" });
+  assert.equal(labState.demos[0].onPage, true);
+  assert.equal(labState.demos[0].hasResult, false);
+  const cardOnly = { getElementById: (id) => id === "demo-xss_lab" ? { id: "demo-xss_lab" } : null };
+  assert.equal(P.demoState(cardOnly, { id: "xss_lab" }).demos[0].onPage, true);
 });
 await ok("page guide keeps hostile headings as text and drops unsafe links", () => {
   const doc = {
@@ -233,9 +293,70 @@ await ok("registration uses document.modelContext and ignores an unavailable bro
   const result = await reg.get("get_site_guide").tool.execute({});
   assert.equal(result.ok, true);
   assert.ok(result.pages.some((p) => p.path === "/gotchas"));
+  const home = result.pages.find((p) => p.path === "/");
+  assert.match(home.summary, /Sign in/);
+});
+await ok("type checks reject the wrong kind of value, and the landing guide stays read-only", async () => {
+  const tools = P.createTools({ demos: true, architecture: true, landing: true });
+  const demo = await tools.find((t) => t.name === "get_demo_catalog").execute({ id: 5 });
+  assert.match(demo.error, /id must be text/);
+  const omitted = await tools.find((t) => t.name === "get_demo_catalog").execute({});
+  assert.equal(omitted.demos.length, 7);
+  const section = await tools.find((t) => t.name === "get_architecture_guide").execute({ section: true });
+  assert.equal(section.error, "section must be text");
+  const all = await tools.find((t) => t.name === "get_architecture_guide").execute({});
+  assert.equal(all.sections.length, 4);
+  const landing = await tools.find((t) => t.name === "get_landing_guide").execute({});
+  assert.equal(landing.ok, true);
+  assert.equal(landing.signedIn, false);
+  assert.equal(landing.signInNeeded, true);
+  assert.ok(landing.links.some((l) => l.path === "/auth/login"));
+});
+await ok("the page note uses the singular for one tool and names tools that change the page", () => {
+  const one = P.statusLine([{ name: "get_site_guide", changesPage: false }]);
+  assert.match(one, /1 read-only tool on this page: get_site_guide/);
+  assert.doesNotMatch(one, /1 read-only tools/);
+  const widget = P.statusLine([
+    { name: "set_color", changesPage: true },
+    { name: "get_color", changesPage: false },
+    { name: "reset_color", changesPage: true },
+    { name: "get_site_guide", changesPage: false },
+    { name: "get_page_guide", changesPage: false },
+  ]);
+  assert.match(widget, /3 read-only tools on this page: get_color, get_site_guide, get_page_guide/);
+  assert.match(widget, /2 tools change the page: set_color, reset_color/);
 });
 
 console.log("CSP and source limits");
+await ok("the lab card is detectable and the sandbox comment explains the cross-origin frame", () => {
+  const src = fs.readFileSync(new URL("../public/demos.js", import.meta.url), "utf8");
+  assert.match(src, /id="demo-xss_lab"/);
+  assert.match(src, /id="xsslab"/);
+  assert.match(src, /This frame is cross-origin/);
+  assert.match(src, /allow-same-origin so the lab page can use its own storage/);
+  assert.match(src, /Do not remove allow-scripts or allow-same-origin/);
+});
+await ok("signed-out /api/lab returns a null token before the sign-in gate", () => {
+  const src = fs.readFileSync(new URL("../src/server.mjs", import.meta.url), "utf8");
+  const lab = src.indexOf('p === "/api/lab"');
+  const gate = src.indexOf('if (!sess) return send(res, 401');
+  assert.ok(lab > 0 && lab < gate);
+  assert.equal(src.split('p === "/api/lab"').length - 1, 1);
+  const signedOut = src.slice(lab, src.indexOf("signLabToken", lab));
+  assert.match(signedOut, /!sess/);
+  assert.match(signedOut, /token:\s*null/);
+});
+await ok("the page-tools guide matches the tools and says Chrome 156 drops outputSchema", () => {
+  const html = fs.readFileSync(new URL("../public/widget/webmcp.html", import.meta.url), "utf8");
+  assert.match(html, /get_landing_guide/);
+  assert.match(html, /needs-human, and not-applicable/);
+  assert.match(html, /id wins/);
+  assert.match(html, /Chrome 156 does not pass <code>outputSchema<\/code> on/);
+  assert.match(html, /#1f6feb/);
+  assert.match(html, /#3366ff is only a sample/);
+  assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)/i);
+  assert.doesNotMatch(html, /\sstyle=/i);
+});
 await ok("page-tools.js does not read cookies, storage, or HTML sinks", () => {
   const src = fs.readFileSync(new URL("../public/page-tools.js", import.meta.url), "utf8");
   for (const banned of ["document.cookie", "localStorage.getItem", "localStorage.setItem", "localStorage.key", "sessionStorage.getItem", "sessionStorage.setItem", "sessionStorage.key", "indexedDB.open", "innerHTML", "insertAdjacentHTML", "eval(", "new Function", "document.write"]) {

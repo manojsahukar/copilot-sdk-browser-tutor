@@ -1316,6 +1316,8 @@
 
     refresh();
     if (cfg.wantChrome) chromeCheck();
+    // Count every tool registered on this page, including tools that change the swatch.
+    if (G.__btwPage && typeof G.__btwPage.updateNote === "function") G.__btwPage.updateNote();
     G.__btwUI = { open: open, close: closeSheet, refresh: refresh, submit: submit, addMsg: addMsg,
       prepareAuth: prepareAuth, exchangeCode: exchangeCode, runCallback: runCallback, connected: connected, disconnect: disconnect,
       providers: function () { return cfg.providers.slice(); }, provider: activeId, switchProvider: switchProvider, connectedTo: connectedTo,

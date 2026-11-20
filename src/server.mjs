@@ -352,6 +352,13 @@ async function handle(req, res) {
 
   if (p === "/api/server-view") return send(res, 200, serverView(req));
 
+  // The demos page asks for a lab token on every visit. Signed-out visitors get no token.
+  // Status 200 avoids a red console error. signLabToken runs only for a real session.
+  if (p === "/api/lab") {
+    if (!sess) return send(res, 200, { token: null });
+    return send(res, 200, { labUrl: cfg.labUrl || null, token: cfg.labUrl ? signLabToken(KEY, sess.login) : null });
+  }
+
   if (!sess) return send(res, 401, { error: "sign in first" });
   if (p === "/api/me") return send(res, 200, {
     login: sess.login, name: sess.name, avatar: sess.avatar, dev: !!sess.dev,
@@ -360,9 +367,6 @@ async function handle(req, res) {
       ? { connected: true, model: sess.or.model, models: OR_MODELS, default: OR_DEFAULT_MODEL, settingsUrl: keySettingsUrl(sess.or.key), revokeUrl: OR_REVOKE_URL }
       : { connected: false, models: OR_MODELS, default: OR_DEFAULT_MODEL },
   });
-
-  // Short-lived token that unlocks the lab's custom-payload box (only for a signed-in session).
-  if (p === "/api/lab") return send(res, 200, { labUrl: cfg.labUrl || null, token: cfg.labUrl ? signLabToken(KEY, sess.login) : null });
 
   // Choose the model engine (and, for OpenRouter, the model). GitHub identity is unchanged.
   if (p === "/api/provider" && req.method === "POST") {

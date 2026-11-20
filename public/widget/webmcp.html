@@ -15,18 +15,21 @@
 
 <h2>What each page offers</h2>
 <p>The read-only tools do not read cookies, web storage, or saved chat. The color tools are the only ones that change the page, and they change only the example color.</p>
-<p>Every page offers <code>get_site_guide</code>. It lists the public pages on this site.</p>
-<p>The signed-in tutor also offers <code>get_browser_reveal</code> and <code>get_connection_reveal</code>. They repeat what the probe page already shows. Cookie values stay hidden.</p>
+<p>Every page offers <code>get_site_guide</code>. It lists the public pages on this site. It returns the path, the title, and a short summary for each page. The home page summary says that sign-in is needed to see what the browser reveals.</p>
+<p>The signed-out home page also offers <code>get_landing_guide</code>. It says you need to sign in before this site can show what the browser reveals. It returns the public links on that page. It does not read the browser.</p>
+<p>The signed-in tutor also offers <code>get_browser_reveal</code> and <code>get_connection_reveal</code>. They repeat what the probe page already shows. Cookie values stay hidden. Each one returns that public view.</p>
 <p>The gotchas page also offers <code>get_atlas_summary</code>, <code>lookup_atlas_technique</code>, and <code>lookup_gotcha</code>. ATLAS is the Adversarial Threat Landscape for Artificial-Intelligence Systems from MITRE. The lookup returns the public lesson. It does not include attack steps.</p>
-<p>The architecture page also offers <code>get_architecture_guide</code>. It describes the four diagrams.</p>
-<p>The live demos page also offers <code>get_demo_catalog</code> and <code>read_demo_state</code>. The catalog is a fixed list. The state tool says whether a result is on screen. It does not return that text.</p>
-<p>The widget docs pages also offer <code>get_page_guide</code>. It lists the headings and the links on the page you are reading.</p>
-<p>The widget home page also offers <code>set_color</code>, <code>get_color</code>, and <code>reset_color</code>. They change or read the example color on that page and nothing else.</p>
+<p>You can give <code>get_atlas_summary</code> a status to keep one group. The groups are fixed, mitigated, accepted, needs-human, and not-applicable. Omit status to list every technique. not-applicable means the techniques that do not apply to this site.</p>
+<p>The lookup tools take a code or words from the name. If you give both, id wins. The result includes a short note when that happens.</p>
+<p>The architecture page also offers <code>get_architecture_guide</code>. It describes the four diagrams. You can pass req, auth, loop, or trust. Omit the section to get all four. It returns the title and summary of each diagram.</p>
+<p>The live demos page also offers <code>get_demo_catalog</code> and <code>read_demo_state</code>. The catalog is a fixed list. Omit the demo code to list all of them. The state tool says whether a demo is on the page and whether a result is on screen. It does not return that text. While the list is still loading, the state says so. The script injection lab counts as on the page.</p>
+<p>The widget docs pages also offer <code>get_page_guide</code>. It returns the headings and the links on the page you are reading.</p>
+<p>The widget home page also offers <code>set_color</code>, <code>get_color</code>, and <code>reset_color</code>. They change or read the example color on that page and nothing else. The swatch starts at #1f6feb. #3366ff is only a sample in the tool form. Each tool returns the color now on the swatch.</p>
 
 <h2>One tool definition, two callers</h2>
 <p>Each tool is written once. WebMCP registers that same object with <code>document.modelContext.registerTool</code>.</p>
 <p>The chat widget on these docs pages can use the same object when you are connected to OpenRouter. The widget reads the list and sends the tools with your question.</p>
-<p>Some fields exist so the Model Context Tool Inspector can show a sample input and a result shape. Those fields are <code>outputSchema</code>, <code>annotations</code>, <code>examples</code>, <code>default</code>, and <code>oneOf</code>. The widget removes them before the call reaches OpenRouter. OpenRouter receives the tool name, the description, and a simpler input schema.</p>
+<p>Some fields exist so the Model Context Tool Inspector can show a sample input. Those fields are <code>annotations</code>, <code>examples</code>, and <code>oneOf</code>. <code>outputSchema</code> documents the result for tests and for future browsers. Chrome 156 does not pass <code>outputSchema</code> on. It is absent from <code>getTools()</code>. The page tools do not set <code>default</code>. A default made the inspector send a value even when leaving the field out would list everything. The color tool still has a sample default so a manual run can fill a color. That sample is #3366ff. It is not the starting color. The starting color is #1f6feb. The widget removes these extra fields before the call reaches OpenRouter. OpenRouter receives the tool name, the description, and a simpler input schema.</p>
 
 <h2>Why the tutor chat does not go through WebMCP</h2>
 <p>The tutor on the main site runs on the server. When the model asks for a tool, the server runs that tool itself. It does not ask the browser to look the tool up through WebMCP.</p>
