@@ -19,5 +19,8 @@
     "@aws-sdk/client-secrets-manager": "^3.1152.0",
     "@github/copilot-sdk": "1.0.22"
   },
+  "overrides": {
+    "zod": "4.6.6"
+  },
   "license": "MIT"
 }
