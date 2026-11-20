@@ -122,7 +122,14 @@
   };
 
   function labCard(d, LAB) {
-    if (!LAB) return `<details class="card demo" open><summary><span class="gt-title">${esc(d.title)}</span><span class="badge docs">unavailable here</span></summary><div class="gt-body"><p>${esc(d.what)}</p><p class="muted">The isolated lab origin isn't configured in this environment.</p></div></details>`;
+    // Chrome warns when a sandbox lists both allow-scripts and allow-same-origin.
+    // That pair is unsafe for a same-origin frame, because the frame could remove its own sandbox.
+    // This frame is cross-origin. It loads the lab origin, not this site.
+    // The lab page needs scripts so the lesson can run.
+    // It also needs allow-same-origin so the lab page can use its own storage.
+    // Do not remove allow-scripts or allow-same-origin.
+    const sandbox = "allow-scripts allow-same-origin allow-forms allow-popups";
+    if (!LAB) return `<details class="card demo" id="demo-xss_lab" data-demo="xss_lab" open><summary><span class="gt-title">${esc(d.title)}</span><span class="badge docs">unavailable here</span></summary><div class="gt-body"><p>${esc(d.what)}</p><p class="muted">The isolated lab origin isn't configured in this environment.</p></div></details>`;
     const presets = [
       ["reflected", "vuln", "Reflected (vuln)"], ["reflected", "fixed", "Reflected (fixed)"],
       ["stored", "vuln", "Stored (vuln)"], ["dom", "vuln", "DOM (vuln)"],
@@ -133,13 +140,13 @@
       ["csp3p", "vuln", "CSP vs Giscus (blocked)"], ["csp3p", "fixed", "CSP vs Giscus (allowed)"],
       ["keystore", "inject", "Where keys live"],
     ].map(([dm, v, l]) => `<button class="lab-preset" data-lab-demo="${dm}" data-lab-variant="${v}">${esc(l)}</button>`).join("");
-    return `<details class="card demo" open>
+    return `<details class="card demo" id="demo-xss_lab" data-demo="xss_lab" open>
       <summary><span class="gt-title">${esc(d.title)}</span><span class="badge build">contained · own origin</span></summary>
       <div class="gt-body">
         <p>${esc(d.what)}</p>
         <h3>Kept contained here</h3><p>${esc(d.localOnly)}</p>
         <div class="lab-presets">${presets}</div>
-        <iframe id="xsslab" class="lab-frame" title="Script injection lab" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="origin"></iframe>
+        <iframe id="xsslab" class="lab-frame" title="Script injection lab" sandbox="${sandbox}" referrerpolicy="origin"></iframe>
         <p class="muted" id="lab-status">loading the isolated lab…</p>
         <details class="raw"><summary>How to defend (real world)</summary><p>${esc(d.revoke)}</p></details>
       </div>
@@ -153,7 +160,8 @@
     const results = { runs: [] };
     const status = (t) => { const el = document.getElementById("lab-status"); if (el) el.textContent = t; };
     frame.src = LAB + "/lab";
-    // fetch a short-lived login token to unlock the custom box (requires being signed in)
+    // Signed-out visitors get { token: null } with status 200. No token is minted for them.
+    // A 401 on this request shows up as a red console error, so the server does not use 401 here.
     fetch("/api/lab").then((r) => (r.ok ? r.json() : null)).then((j) => { token = j && j.token; if (ready && token) frame.contentWindow.postMessage({ type: "bt-lab-init", token }, labOrigin); }).catch(() => {});
     window.addEventListener("message", (e) => {
       if (e.origin !== labOrigin) return;                       // only trust the lab origin

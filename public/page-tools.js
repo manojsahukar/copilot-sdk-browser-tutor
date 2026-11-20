@@ -13,7 +13,7 @@
   var HIDE_KEYS = { cookie: 1, cookies: 1, authorization: 1, "set-cookie": 1, access_token: 1, refresh_token: 1, id_token: 1, client_secret: 1, api_key: 1, apikey: 1, password: 1, secret: 1, token: 1, btw_or_key: 1, btw_or_key_persist: 1, btw_hf_token: 1, bt_sess: 1, bt_chat: 1, btw_pkce: 1 };
 
   var SITE_PAGES = [
-    { path: "/", title: "Browser probe and tutor", summary: "Shows what this browser reveals, then lets you ask the tutor." },
+    { path: "/", title: "Browser probe and tutor", summary: "Sign in to see what this browser reveals, then ask the tutor." },
     { path: "/gotchas", title: "Agent SDK gotchas", summary: "Lessons from this build, plus a MITRE ATLAS evaluation." },
     { path: "/architecture", title: "Architecture", summary: "How a request, sign-in, and the agent tools fit together." },
     { path: "/demos", title: "Live demos", summary: "Permission and storage demos that run only when you tap." },
@@ -41,7 +41,9 @@
   ];
   var DEMO_IDS = DEMOS.map(function (d) { return d.id; });
   var ARCH_IDS = ARCH.map(function (s) { return s.id; });
+  var ATLAS_STATUS = ["fixed", "mitigated", "accepted", "needs-human", "not-applicable"];
   var EMPTY = { type: "object", additionalProperties: false, properties: {} };
+  var BOTH_NOTE = "You gave a code and words. id wins if you give both.";
 
   function cap(s, n) {
     s = String(s == null ? "" : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
@@ -72,6 +74,46 @@
     for (var i = 0; i < keys.length; i++) props[keys[i]] = extra[keys[i]];
     return { type: "object", additionalProperties: false, required: ["ok"], properties: props };
   }
+  function typeLabel(t) {
+    if (t === "string") return "text";
+    if (t === "number") return "a number";
+    if (t === "integer") return "a whole number";
+    if (t === "boolean") return "true or false";
+    if (t === "array") return "a list";
+    if (t === "object") return "an object";
+    return "";
+  }
+  function valueMatchesType(v, t) {
+    if (t === "string") return typeof v === "string";
+    if (t === "number") return typeof v === "number" && Number.isFinite(v);
+    if (t === "integer") return typeof v === "number" && Number.isFinite(v) && Math.floor(v) === v;
+    if (t === "boolean") return typeof v === "boolean";
+    if (t === "array") return Array.isArray(v);
+    if (t === "object") return v !== null && typeof v === "object" && !Array.isArray(v);
+    return true;
+  }
+  function typeError(name, schema, value) {
+    if (!schema || typeof schema !== "object") return "";
+    var types = [];
+    if (typeof schema.type === "string") types.push(schema.type);
+    else if (Array.isArray(schema.type)) {
+      for (var i = 0; i < schema.type.length; i++) if (typeof schema.type[i] === "string") types.push(schema.type[i]);
+    }
+    if (!types.length && Array.isArray(schema.oneOf)) {
+      for (var j = 0; j < schema.oneOf.length; j++) {
+        var branch = schema.oneOf[j];
+        if (branch && typeof branch.type === "string") types.push(branch.type);
+      }
+    }
+    if (!types.length) return "";
+    for (var k = 0; k < types.length; k++) if (valueMatchesType(value, types[k])) return "";
+    var labels = [];
+    for (var n = 0; n < types.length; n++) {
+      var label = typeLabel(types[n]);
+      if (label && labels.indexOf(label) < 0) labels.push(label);
+    }
+    return name + " must be " + (labels.join(" or ") || "the right type");
+  }
   function checkInput(schema, input) {
     if (input == null) input = {};
     if (typeof input !== "object" || Array.isArray(input)) return { error: "Input must be an object." };
@@ -80,6 +122,10 @@
     for (var i = 0; i < keys.length; i++) if (!Object.prototype.hasOwnProperty.call(props, keys[i])) return { error: "Unknown input field: " + String(keys[i]).slice(0, 40) };
     var req = schema && schema.required || [];
     for (var j = 0; j < req.length; j++) if (!Object.prototype.hasOwnProperty.call(input, req[j])) return { error: "Missing input field: " + req[j] };
+    for (var k = 0; k < keys.length; k++) {
+      var err = typeError(String(keys[k]).slice(0, 40), props[keys[k]], input[keys[k]]);
+      if (err) return { error: err };
+    }
     return { value: input };
   }
   function field(input, key) {
@@ -135,8 +181,10 @@
     if (!view || typeof view !== "object" || Array.isArray(view)) return { ok: false, error: "The connection panel could not be read." };
     return { ok: true, message: "This is the connection view already shown on the page. Cookie values stay hidden.", connection: view };
   }
-  function summarizeAtlas(data) {
+  function summarizeAtlas(data, input) {
     if (!data || !data.meta) return { ok: false, error: "The ATLAS evaluation is not available." };
+    var status = field(input, "status");
+    if (status && ATLAS_STATUS.indexOf(status) < 0) return { ok: false, error: "Unknown status. Use fixed, mitigated, accepted, needs-human, or not-applicable." };
     var app = Array.isArray(data.applicable) ? data.applicable : [];
     var na = Array.isArray(data.notApplicable) ? data.notApplicable : [];
     var counts = { applicable: app.length, notApplicable: na.length, fixed: 0, mitigated: 0, accepted: 0, needsHuman: 0 };
@@ -149,11 +197,28 @@
       else if (st === "needs-human") counts.needsHuman++;
       rows.push({ id: app[i].id, name: app[i].name, status: st });
     }
+    var meta = { name: data.meta.fullName, version: data.meta.version, modified: data.meta.modifiedDate, evaluatedOn: data.meta.evaluatedOn };
+    var notApplicable = na.map(function (t) { return { id: t.id, name: t.name }; });
+    if (status === "not-applicable") {
+      return {
+        ok: true, status: status,
+        message: "MITRE ATLAS lists " + notApplicable.length + " techniques that do not apply to this site.",
+        meta: meta, counts: counts, applicable: [], notApplicable: notApplicable
+      };
+    }
+    if (status) {
+      var filtered = [];
+      for (var f = 0; f < rows.length; f++) if (rows[f].status === status) filtered.push(rows[f]);
+      return {
+        ok: true, status: status,
+        message: "MITRE ATLAS lists " + filtered.length + " techniques marked " + status + ".",
+        meta: meta, counts: counts, applicable: filtered, notApplicable: []
+      };
+    }
     return {
       ok: true,
       message: "MITRE ATLAS " + (data.meta.version || "") + " lists " + app.length + " techniques that apply to this site.",
-      meta: { name: data.meta.fullName, version: data.meta.version, modified: data.meta.modifiedDate, evaluatedOn: data.meta.evaluatedOn },
-      counts: counts, applicable: rows, notApplicable: na.map(function (t) { return { id: t.id, name: t.name }; })
+      meta: meta, counts: counts, applicable: rows, notApplicable: notApplicable
     };
   }
   function techniqueView(t, applicable) {
@@ -165,16 +230,20 @@
     } else view.reason = cap(t.reason, 1500);
     return view;
   }
+  function withBothNote(result, id, query) {
+    if (id && query) result.note = BOTH_NOTE;
+    return result;
+  }
   function lookupAtlas(data, input) {
     if (!data || typeof data !== "object") return { ok: false, error: "The ATLAS evaluation is not available." };
     var id = field(input, "id"), query = field(input, "query").toLowerCase();
     var app = Array.isArray(data.applicable) ? data.applicable : [];
     var na = Array.isArray(data.notApplicable) ? data.notApplicable : [];
     if (id) {
-      if (!/^AML\.T[0-9]{4}(?:\.[0-9]{3})?$/.test(id)) return { ok: false, error: "Technique code should look like AML.T0051." };
-      for (var i = 0; i < app.length; i++) if (app[i].id === id) return { ok: true, message: app[i].id + " " + app[i].name + ".", technique: techniqueView(app[i], true) };
-      for (var n = 0; n < na.length; n++) if (na[n].id === id) return { ok: true, message: na[n].id + " does not apply to this site.", technique: techniqueView(na[n], false) };
-      return { ok: false, error: "No technique matches that code." };
+      if (!/^AML\.T[0-9]{4}(?:\.[0-9]{3})?$/.test(id)) return withBothNote({ ok: false, error: "Technique code should look like AML.T0051." }, id, query);
+      for (var i = 0; i < app.length; i++) if (app[i].id === id) return withBothNote({ ok: true, message: app[i].id + " " + app[i].name + ".", technique: techniqueView(app[i], true) }, id, query);
+      for (var n = 0; n < na.length; n++) if (na[n].id === id) return withBothNote({ ok: true, message: na[n].id + " does not apply to this site.", technique: techniqueView(na[n], false) }, id, query);
+      return withBothNote({ ok: false, error: "No technique matches that code." }, id, query);
     }
     if (!query) return { ok: false, error: "Give a technique code such as AML.T0051." };
     var hits = [];
@@ -194,9 +263,9 @@
     if (!Array.isArray(items)) return { ok: false, error: "The gotchas list is not available." };
     var id = field(input, "id").toLowerCase(), query = field(input, "query").toLowerCase();
     if (id) {
-      if (!/^[a-z0-9-]{1,64}$/.test(id)) return { ok: false, error: "Gotcha code should be short words joined by hyphens, such as llm-js-xss." };
-      for (var i = 0; i < items.length; i++) if (String(items[i].id) === id) return { ok: true, message: items[i].title + ".", gotcha: gotchaView(items[i]) };
-      return { ok: false, error: "No gotcha matches that code." };
+      if (!/^[a-z0-9-]{1,64}$/.test(id)) return withBothNote({ ok: false, error: "Gotcha code should be short words joined by hyphens, such as llm-js-xss." }, id, query);
+      for (var i = 0; i < items.length; i++) if (String(items[i].id) === id) return withBothNote({ ok: true, message: items[i].title + ".", gotcha: gotchaView(items[i]) }, id, query);
+      return withBothNote({ ok: false, error: "No gotcha matches that code." }, id, query);
     }
     if (!query) return { ok: false, error: "Give a gotcha code such as llm-js-xss." };
     var hits = [];
@@ -217,16 +286,34 @@
     if (id && !rows.length) return { ok: false, error: "Unknown demo code.", allowedIds: DEMO_IDS.slice() };
     return { ok: true, message: rows.length === 1 ? rows[0].title + "." : "There are " + rows.length + " live demos. None of them run from this tool.", demos: rows.map(function (d) { return { id: d.id, title: d.title, needsPermission: d.needsPermission, summary: d.summary }; }) };
   }
+  function pageEl(doc, id) {
+    return doc && typeof doc.getElementById === "function" ? doc.getElementById(id) : null;
+  }
+  function demosStillLoading(doc) {
+    if (!pageEl(doc, "demos")) return false;
+    if (pageEl(doc, "out-storage_inspector") || pageEl(doc, "xsslab") || pageEl(doc, "demo-xss_lab")) return false;
+    return true;
+  }
+  function demoPresence(doc, id) {
+    var outEl = pageEl(doc, "out-" + id);
+    if (outEl) {
+      var text = outEl.textContent ? String(outEl.textContent).trim() : "";
+      return { onPage: true, hasResult: text.length > 0 };
+    }
+    if (id === "xss_lab" && (pageEl(doc, "xsslab") || pageEl(doc, "demo-xss_lab"))) return { onPage: true, hasResult: false };
+    return { onPage: false, hasResult: false };
+  }
   function demoState(doc, input) {
     var id = field(input, "id");
     if (id && DEMO_IDS.indexOf(id) < 0) return { ok: false, error: "Unknown demo code.", allowedIds: DEMO_IDS.slice() };
+    var loading = demosStillLoading(doc);
     var rows = [];
     for (var i = 0; i < DEMOS.length; i++) {
       if (id && DEMOS[i].id !== id) continue;
-      var el = doc && typeof doc.getElementById === "function" ? doc.getElementById("out-" + DEMOS[i].id) : null;
-      var text = el && el.textContent ? String(el.textContent).trim() : "";
-      rows.push({ id: DEMOS[i].id, title: DEMOS[i].title, needsPermission: DEMOS[i].needsPermission, onPage: !!el, hasResult: text.length > 0 });
+      var seen = loading ? { onPage: "still loading", hasResult: false } : demoPresence(doc, DEMOS[i].id);
+      rows.push({ id: DEMOS[i].id, title: DEMOS[i].title, needsPermission: DEMOS[i].needsPermission, onPage: seen.onPage, hasResult: seen.hasResult });
     }
+    if (loading) return { ok: true, loading: true, message: "The demo list is still loading.", demos: rows };
     return { ok: true, message: "Demo state is the demo code and whether a result is on screen. Stored text is not included.", demos: rows };
   }
   function safePath(href) {
@@ -262,6 +349,21 @@
       page: { title: cap(info.title, 160), path: String(info.path || "/"), headings: (info.headings || []).slice(0, 12), links: (info.links || []).slice(0, 20) }
     };
   }
+  function landingGuide() {
+    return {
+      ok: true,
+      message: "This is the signed-out home page. Sign in to see what this browser reveals.",
+      signedIn: false,
+      signInNeeded: true,
+      links: [
+        { path: "/auth/login", summary: "Sign in with GitHub to see what this browser reveals and to ask the tutor." },
+        { path: "/demos", summary: "Live permission demos. You can open these before you sign in." },
+        { path: "/gotchas", summary: "Lessons from this build. You can open these before you sign in." },
+        { path: "/architecture", summary: "How the app is built. You can open this before you sign in." },
+        { path: "/widget/webmcp.html", summary: "How page tools work. You can open this before you sign in." }
+      ]
+    };
+  }
 
   var PAGE_SCHEMA = outSchema({
     page: { type: "object", additionalProperties: false, required: ["title", "path", "headings", "links"], properties: {
@@ -269,59 +371,67 @@
       headings: { type: "array", items: { type: "string" } }, links: { type: "array", items: { type: "string" } }
     } }
   });
+  var LINK_SCHEMA = { type: "object", additionalProperties: false, required: ["path", "summary"], properties: { path: { type: "string" }, summary: { type: "string" } } };
   var SPECS = {
     site: { name: "get_site_guide", title: "Site guide", untrusted: false,
-      description: "List the public pages on this site and what each one is for. This only reads a fixed list. It does not read cookies, keys, or saved chat. You can call it again.",
+      description: "List the public pages on this site and what each one is for. It returns the path, the title, and a short summary for each page. This only reads a fixed list. It does not read cookies, keys, or saved chat. You can call it again.",
       inputSchema: EMPTY, outputSchema: outSchema({ pages: { type: "array", items: { type: "object", additionalProperties: false, required: ["path", "title", "summary"], properties: { path: { type: "string" }, title: { type: "string" }, summary: { type: "string" } } } } }) },
+    landing: { name: "get_landing_guide", title: "Signed-out home page", untrusted: false,
+      description: "Describe the signed-out home page. Sign-in is needed before this site can show what the browser reveals. It returns the public links on this page. It does not read cookies, keys, or the browser probe. You can call it again.",
+      inputSchema: EMPTY, outputSchema: outSchema({ signedIn: { type: "boolean" }, signInNeeded: { type: "boolean" }, links: { type: "array", items: LINK_SCHEMA } }) },
     browser: { name: "get_browser_reveal", title: "What the browser reveals", untrusted: true,
-      description: "Read what this page already shows about the browser, such as language, screen, and graphics. This changes nothing. It does not read cookies, keys, or saved chat. You can call it again.",
+      description: "Read what this page already shows about the browser, such as language, screen, and graphics. It returns the public probe already shown on the page. This changes nothing. It does not read cookies, keys, or saved chat. You can call it again.",
       inputSchema: EMPTY, outputSchema: outSchema({ reveal: { type: "object", description: "The public probe already on the page." } }) },
     connection: { name: "get_connection_reveal", title: "What the connection reveals", untrusted: true,
-      description: "Read what this page already shows about the connection, with cookie values hidden. This changes nothing. It does not read saved chat or keys. You can call it again.",
+      description: "Read what this page already shows about the connection, with cookie values hidden. It returns that connection panel. This changes nothing. It does not read saved chat or keys. You can call it again.",
       inputSchema: EMPTY, outputSchema: outSchema({ connection: { type: "object", description: "The connection panel, with secrets hidden." } }) },
     atlas: { name: "get_atlas_summary", title: "ATLAS summary", untrusted: false,
-      description: "Summarize the MITRE ATLAS (Adversarial Threat Landscape for Artificial-Intelligence Systems) evaluation on this page. This only reads the public evaluation. You can call it again.",
-      inputSchema: EMPTY, outputSchema: outSchema({ meta: { type: "object" }, counts: { type: "object" }, applicable: { type: "array" }, notApplicable: { type: "array" } }) },
+      description: "Summarize the MITRE ATLAS (Adversarial Threat Landscape for Artificial-Intelligence Systems) evaluation on this page. You can give a status to keep one group. The groups are fixed, mitigated, accepted, needs-human, and not-applicable. Omit status to list every technique. It returns the version, the counts, and the matching techniques. This only reads the public evaluation. You can call it again.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        status: { type: "string", description: "One group, or omit it to list every technique. The sample uses mitigated. not-applicable means the techniques that do not apply to this site.", examples: ["mitigated"], enum: ATLAS_STATUS.slice() }
+      } },
+      outputSchema: outSchema({ status: { type: "string" }, meta: { type: "object" }, counts: { type: "object" }, applicable: { type: "array" }, notApplicable: { type: "array" } }) },
     atlasOne: { name: "lookup_atlas_technique", title: "Look up an ATLAS technique", untrusted: false,
-      description: "Look up one MITRE ATLAS (Adversarial Threat Landscape for Artificial-Intelligence Systems) technique by its code, such as AML.T0051, or by words in its name. This returns the public defensive note for this site. It does not include attack steps. You can call it again.",
+      description: "Look up one MITRE ATLAS (Adversarial Threat Landscape for Artificial-Intelligence Systems) technique by its code, such as AML.T0051, or by words in its name. id wins if you give both. It returns the public note for one technique, or a short list when several names match. It does not include attack steps. You can call it again.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
-        id: { type: "string", maxLength: 20, description: "Technique code such as AML.T0051.", default: "AML.T0051", examples: ["AML.T0051"], pattern: "^AML\\.T[0-9]{4}(?:\\.[0-9]{3})?$" },
-        query: { type: "string", maxLength: 80, description: "Words from the technique name, such as prompt injection.", examples: ["prompt injection"], default: "prompt injection" }
+        id: { type: "string", maxLength: 20, description: "Technique code such as AML.T0051. id wins if you give both.", examples: ["AML.T0051"], pattern: "^AML\\.T[0-9]{4}(?:\\.[0-9]{3})?$" },
+        query: { type: "string", maxLength: 80, description: "Words from the technique name, such as prompt injection. id wins if you give both.", examples: ["prompt injection"] }
       } },
-      outputSchema: outSchema({ technique: { type: "object" }, matches: { type: "array" } }) },
+      outputSchema: outSchema({ note: { type: "string", description: "Set when both a code and words were given. The code is used." }, technique: { type: "object" }, matches: { type: "array" } }) },
     gotcha: { name: "lookup_gotcha", title: "Look up a gotcha", untrusted: false,
-      description: "Look up one Agent SDK gotcha by its code, such as llm-js-xss, or by words in its title. This reads the public lesson text. You can call it again.",
+      description: "Look up one Agent SDK gotcha by its code, such as llm-js-xss, or by words in its title. id wins if you give both. It returns the public lesson for one gotcha, or a short list when several titles match. You can call it again.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
-        id: { type: "string", maxLength: 64, description: "Gotcha code such as llm-js-xss.", default: "llm-js-xss", examples: ["llm-js-xss"], pattern: "^[a-z0-9-]{1,64}$" },
-        query: { type: "string", maxLength: 80, description: "Words from the gotcha title.", examples: ["prompt injection"], default: "prompt injection" }
+        id: { type: "string", maxLength: 64, description: "Gotcha code such as llm-js-xss. id wins if you give both.", examples: ["llm-js-xss"], pattern: "^[a-z0-9-]{1,64}$" },
+        query: { type: "string", maxLength: 80, description: "Words from the gotcha title. id wins if you give both.", examples: ["prompt injection"] }
       } },
-      outputSchema: outSchema({ gotcha: { type: "object" }, matches: { type: "array" } }) },
+      outputSchema: outSchema({ note: { type: "string", description: "Set when both a code and words were given. The code is used." }, gotcha: { type: "object" }, matches: { type: "array" } }) },
     arch: { name: "get_architecture_guide", title: "Architecture guide", untrusted: false,
-      description: "Read a short guide to the architecture diagrams on this page. Pass a section code such as req, auth, loop, or trust. This changes nothing. You can call it again.",
+      description: "Read a short guide to the architecture diagrams on this page. Pass a section code such as req, auth, loop, or trust. Omit it to get all four. It returns the title and summary of each diagram. This changes nothing. You can call it again.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
-        section: { type: "string", description: "Diagram code. req, auth, loop, or trust.", default: "req", examples: ["req"], enum: ARCH_IDS.slice() }
+        section: { type: "string", description: "Diagram code. req, auth, loop, or trust. Omit it to get all four. The manual sample uses req.", examples: ["req"], enum: ARCH_IDS.slice() }
       } },
       outputSchema: outSchema({ sections: { type: "array" } }) },
     catalog: { name: "get_demo_catalog", title: "Demo catalog", untrusted: false,
-      description: "List the live demos and whether each one asks for a permission. This reads a fixed list and does not run a demo. You can call it again.",
+      description: "List the live demos and whether each one asks for a permission. Omit the demo code to list all of them. It returns the title, the permission flag, and a short summary. This reads a fixed list and does not run a demo. You can call it again.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
-        id: { type: "string", description: "One demo code, or omit it to list them all. The manual sample uses storage_inspector.", default: "storage_inspector", examples: ["storage_inspector"], enum: DEMO_IDS.slice() }
+        id: { type: "string", description: "One demo code, or omit it to list them all. The manual sample uses storage_inspector.", examples: ["storage_inspector"], enum: DEMO_IDS.slice() }
       } },
       outputSchema: outSchema({ demos: { type: "array" }, allowedIds: { type: "array", items: { type: "string" } } }) },
     state: { name: "read_demo_state", title: "Demo state", untrusted: false,
-      description: "Report which demos are on this page and whether each one has a result on screen. This does not return stored chat, cookie values, or keys. You can call it again.",
+      description: "Report which demos are on this page and whether each one has a result on screen. Omit the demo code to report all of them. It returns that state and does not return the text on screen. You can call it again.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
-        id: { type: "string", description: "One demo code, or omit it to report them all. The manual sample uses storage_inspector.", default: "storage_inspector", examples: ["storage_inspector"], enum: DEMO_IDS.slice() }
+        id: { type: "string", description: "One demo code, or omit it to report them all. The manual sample uses storage_inspector.", examples: ["storage_inspector"], enum: DEMO_IDS.slice() }
       } },
-      outputSchema: outSchema({ demos: { type: "array" }, allowedIds: { type: "array", items: { type: "string" } } }) },
+      outputSchema: outSchema({ loading: { type: "boolean" }, demos: { type: "array" }, allowedIds: { type: "array", items: { type: "string" } } }) },
     page: { name: "get_page_guide", title: "Page guide", untrusted: true,
-      description: "Read the title, headings, and same-site links on this docs page. This changes nothing. It does not read keys, cookies, or saved chat. You can call it again.",
+      description: "Read the title, headings, and same-site links on this docs page. It returns those headings and links. This changes nothing. It does not read keys, cookies, or saved chat. You can call it again.",
       inputSchema: EMPTY, outputSchema: PAGE_SCHEMA }
   };
 
   function markersFrom(doc) {
     return {
       probe: !!(doc && doc.getElementById && doc.getElementById("fp")),
+      landing: !!(doc && doc.getElementById && doc.getElementById("dev") && !doc.getElementById("fp")),
       gotchas: !!(doc && doc.getElementById && doc.getElementById("atlas")),
       architecture: !!(doc && doc.getElementById && doc.getElementById("req")),
       demos: !!(doc && doc.getElementById && doc.getElementById("demos")),
@@ -331,6 +441,7 @@
   function specList(markers) {
     var m = markers || {};
     var list = [SPECS.site];
+    if (m.landing) list.push(SPECS.landing);
     if (m.probe) list.push(SPECS.browser, SPECS.connection);
     if (m.gotchas) list.push(SPECS.atlas, SPECS.atlasOne, SPECS.gotcha);
     if (m.architecture) list.push(SPECS.arch);
@@ -361,10 +472,11 @@
     };
     var runners = {
       get_site_guide: function () { return siteGuide(); },
+      get_landing_guide: function () { return landingGuide(); },
       get_browser_reveal: function () { return browserReveal(fp()); },
       get_connection_reveal: function () { return connectionReveal(conn()); },
-      get_atlas_summary: function () {
-        return cached("/api/atlas").then(summarizeAtlas, function () { return { ok: false, error: "The ATLAS evaluation could not be loaded. Reload the page and try again." }; });
+      get_atlas_summary: function (input) {
+        return cached("/api/atlas").then(function (data) { return summarizeAtlas(data, input); }, function () { return { ok: false, error: "The ATLAS evaluation could not be loaded. Reload the page and try again." }; });
       },
       lookup_atlas_technique: function (input) {
         return cached("/api/atlas").then(function (data) { return lookupAtlas(data, input); }, function () { return { ok: false, error: "The ATLAS evaluation could not be loaded. Reload the page and try again." }; });
@@ -402,12 +514,53 @@
     });
   }
 
+  function toolChangesPage(name, ann) {
+    if (ann && ann.readOnlyHint === false) return true;
+    if (ann && ann.readOnlyHint === true) return false;
+    var specs = G.__btwColor && G.__btwColor.TOOL_SPECS;
+    if (specs) {
+      for (var i = 0; i < specs.length; i++) if (specs[i].name === name) return !specs[i].readOnly;
+    }
+    return false;
+  }
+  function namesToList(pageNames, colorNames) {
+    var list = [], seen = Object.create(null);
+    function add(name, changes) {
+      if (!name || seen[name]) return;
+      seen[name] = 1;
+      list.push({ name: name, changesPage: !!changes });
+    }
+    var i;
+    for (i = 0; i < (colorNames || []).length; i++) add(colorNames[i], toolChangesPage(colorNames[i], null));
+    for (i = 0; i < (pageNames || []).length; i++) add(pageNames[i], false);
+    return list;
+  }
+  function statusLine(list) {
+    var read = [], change = [], seen = Object.create(null);
+    for (var i = 0; i < (list || []).length; i++) {
+      var name = String(list[i] && list[i].name || "");
+      if (!name || seen[name]) continue;
+      seen[name] = 1;
+      if (list[i].changesPage) change.push(name);
+      else read.push(name);
+    }
+    if (!read.length && !change.length) return "WebMCP is in this browser, but the tools could not be registered.";
+    var parts = [];
+    if (read.length === 1) parts.push("A browser assistant can use 1 read-only tool on this page: " + read[0] + ".");
+    else if (read.length) parts.push("A browser assistant can use " + read.length + " read-only tools on this page: " + read.join(", ") + ".");
+    if (change.length === 1) parts.push("1 tool changes the page: " + change[0] + ".");
+    else if (change.length) parts.push(change.length + " tools change the page: " + change.join(", ") + ".");
+    parts.push("They do not read cookies, keys, or saved chat.");
+    return parts.join(" ");
+  }
+
   G.__btwPage = {
     SITE_PAGES: SITE_PAGES, DEMOS: DEMOS, ARCH: ARCH, SPECS: SPECS, hints: hints,
     scrub: scrub, safePath: safePath, siteGuide: siteGuide, browserReveal: browserReveal, connectionReveal: connectionReveal,
     summarizeAtlas: summarizeAtlas, lookupAtlas: lookupAtlas, lookupGotcha: lookupGotcha, architectureGuide: architectureGuide,
-    demoCatalog: demoCatalog, demoState: demoState, readPage: readPage, pageGuide: pageGuide,
-    markersFrom: markersFrom, specList: specList, createTools: createTools, findModelContext: findModelContext, registerWebMCP: registerWebMCP
+    demoCatalog: demoCatalog, demoState: demoState, readPage: readPage, pageGuide: pageGuide, landingGuide: landingGuide,
+    markersFrom: markersFrom, specList: specList, createTools: createTools, findModelContext: findModelContext, registerWebMCP: registerWebMCP,
+    statusLine: statusLine, ATLAS_STATUS: ATLAS_STATUS
   };
   if (!HAS_DOM) return;
 
@@ -424,6 +577,47 @@
     el.hidden = false;
     el.textContent = text;
   }
+  function whenColorSettled() {
+    return new Promise(function (resolve) {
+      var tries = 0;
+      (function tick() {
+        var c = G.__btwColorWebMCP;
+        if (c && c.status === "pending" && tries < 80) { tries++; setTimeout(tick, 25); return; }
+        resolve();
+      })();
+    });
+  }
+  function collectRegistered(doc, nav) {
+    var mc = findModelContext(doc, nav);
+    if (!mc || typeof mc.getTools !== "function") return Promise.resolve(null);
+    return Promise.resolve().then(function () { return mc.getTools(); }).then(function (tools) {
+      if (!Array.isArray(tools)) return null;
+      var list = [];
+      for (var i = 0; i < tools.length; i++) {
+        var t = tools[i];
+        if (!t || !t.name) continue;
+        list.push({ name: t.name, changesPage: toolChangesPage(t.name, t.annotations || null) });
+      }
+      return list;
+    }, function () { return null; });
+  }
+  function noteFrom(list, reg) {
+    if (!list || !list.length) {
+      var color = G.__btwColorWebMCP;
+      list = namesToList(reg && reg.names, color && color.status !== "pending" ? color.names : []);
+    }
+    return statusLine(list);
+  }
+  function updateNote() {
+    var reg = G.__btwPageWebMCP;
+    if (!reg || reg.status === "unavailable" || reg.status === "pending") return Promise.resolve();
+    return whenColorSettled().then(function () {
+      return collectRegistered(document, G.navigator);
+    }).then(function (list) {
+      placeNote(document, noteFrom(list, reg));
+    });
+  }
+  G.__btwPage.updateNote = updateNote;
   function boot() {
     if (G.__btwPageBooted) return;
     G.__btwPageBooted = true;
@@ -436,12 +630,14 @@
       for (var j = 0; j < tools.length; j++) if (!have[tools[j].name]) G.btwPageTools.push(tools[j]);
     }
     registerWebMCP(document, tools, G.navigator).then(function (r) {
-      G.__btwPageWebMCP = r;
-      if (r.status === "unavailable") return;
-      var text = r.status === "failed"
-        ? "WebMCP is in this browser, but the read-only tools could not be registered."
-        : "A browser assistant can use " + r.names.length + " read-only tools on this page: " + r.names.join(", ") + ". They do not read cookies, keys, or saved chat.";
-      placeNote(document, text);
+      if (r.status === "unavailable") { G.__btwPageWebMCP = r; return; }
+      G.__btwPageWebMCP = { status: "pending", names: r.names, errors: r.errors };
+      return whenColorSettled().then(function () {
+        return collectRegistered(document, G.navigator);
+      }).then(function (list) {
+        placeNote(document, noteFrom(list, r));
+        G.__btwPageWebMCP = r;
+      });
     });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();

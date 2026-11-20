@@ -158,7 +158,7 @@ must(w.bad.ok === false && /Not a valid color/.test(w.bad.error) && Array.isArra
 must(w.get.ok === true && w.get.swatch.color === "#ff8800", "get_color reads the current color");
 must(w.templated.ok === true && w.afterTemplate === "#3366ff", "inspector sample input changes the swatch to #3366ff");
 must(w.guide.ok === true && /[Kk]eys, cookies/.test(w.guide.message), "get_page_guide runs and says it does not read keys or cookies");
-must(/read-only tools/.test(w.note) && !/cookie=|sk-or-/.test(w.note), "status line names the read-only tools");
+must(/3 read-only tools/.test(w.note) && /2 tools change the page/.test(w.note) && /set_color/.test(w.note) && /reset_color/.test(w.note) && /get_color/.test(w.note) && !/cookie=|sk-or-/.test(w.note), "status line counts every tool and names the ones that change the page");
 must(/WebMCP is on/.test(w.statusText) && /wm-on/.test(w.statusCls), "status text says WebMCP is on");
 must(/WebMCP agent called set_color/.test(w.log), "page log credits the WebMCP agent");
 await p.evaluate(() => document.getElementById("color-demo").scrollIntoView({ block: "start" }));

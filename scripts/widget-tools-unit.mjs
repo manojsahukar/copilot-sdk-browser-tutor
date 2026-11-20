@@ -40,6 +40,12 @@ await ok("31 CSS color names are listed in set_color inputSchema", () => {
   assert.deepEqual(color.oneOf[1].enum, C.COLOR_NAMES);
   for (const name of C.COLOR_NAMES) assert.ok(color.description.includes(name), name);
   assert.match(color.description, /#rgb or #rrggbb/);
+  assert.match(color.description, /#3366ff is only a sample/);
+  assert.match(color.description, /The swatch starts at #1f6feb/);
+  for (const t of C.TOOL_SPECS) assert.match(t.description, /It returns/);
+  assert.match(C.TOOL_SPECS[0].description, /#3366ff is only a sample/);
+  assert.match(C.TOOL_SPECS[0].description, /starts at #1f6feb/);
+  assert.match(C.TOOL_SPECS[2].description, /#1f6feb/);
 });
 await ok("every color tool has an outputSchema for success and error", () => {
   for (const t of C.TOOL_SPECS) {
@@ -64,7 +70,7 @@ await ok("annotations are explicit and repeatability is written in the descripti
 console.log("Color tools: strict validation (bad input changes nothing)");
 const s0 = { hex: C.DEFAULT, name: null };
 const bad = [
-  ["set_color", {}, /Missing/], ["set_color", { color: 5 }, /must be a string/], ["set_color", { color: "#12" }, /Not a valid color/],
+  ["set_color", {}, /Missing/], ["set_color", { color: 5 }, /must be text/], ["set_color", { color: "#12" }, /Not a valid color/],
   ["set_color", { color: "#gggggg" }, /Not a valid color/], ["set_color", { color: "#1234567" }, /Not a valid color/],
   ["set_color", { color: "red; background:url(x)" }, /Not a valid color/], ["set_color", { color: "rgb(1,2,3)" }, /Not a valid color/],
   ["set_color", { color: "url(javascript:alert(1))" }, /Not a valid color/], ["set_color", { color: "constructor" }, /Not a valid color/],

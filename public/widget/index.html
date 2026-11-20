@@ -14,7 +14,7 @@
 <p>The widget sends the visible text of the page you are on as context, so it can answer questions about what you are reading. It also loads a small <code>site-index.json</code> built at deploy time and does lightweight in-browser retrieval (BM25) across every page, so it can answer site-wide questions and cite the page it used.</p>
 <p>Try asking: <em>"Where is my OpenRouter key stored?"</em>, <em>"Why is a client-side key an XSS risk?"</em>, or <em>"Who pays for the model calls?"</em> — the answer should link to the matching page.</p>
 <h2>Try a tool call: the chat can change this color</h2>
-<p>The chat can do more than answer questions. It can also change the color below. Connect OpenRouter, then ask for a change, for example <em>"Make it teal"</em> or <em>"Set the color to #ff8800"</em>.</p>
+<p>The chat can do more than answer questions. It can also change the color below. The swatch starts at #1f6feb. Connect OpenRouter, then ask for a change, for example <em>"Make it teal"</em> or <em>"Set the color to #ff8800"</em>. A sample you may see in a tool form is #3366ff. That sample is not the starting color.</p>
 <div id="color-demo" class="color-demo">
 <div class="cp-swatch" role="img" aria-label="Example color swatch"></div>
 <div class="cp-row"><label>Pick a color <input class="cp-input" type="color" value="#1f6feb"></label><button type="button" data-tool="reset_color">Reset color</button></div>
@@ -33,7 +33,7 @@
 <p>The widget stops after four rounds of tool calls. Tool calls work only with the OpenRouter provider. With the other providers, the chat answers with text only. Some free models cannot use tools. If you get an error, send the message again or pick another model.</p>
 <h2>The same tools for an outside assistant (WebMCP)</h2>
 <p>WebMCP is a proposed web standard. It lets a page offer its tools to an AI assistant in the browser, for example a browser agent or an extension.</p>
-<p>This page registers the same three tools with <code>document.modelContext.registerTool()</code>. The widget and WebMCP use the same tool code and the same input rules. The result schema tells an assistant what a successful call and a refused call look like.</p>
+<p>This page registers the same three tools with <code>document.modelContext.registerTool()</code>. The widget and WebMCP use the same tool code and the same input rules. Each tool also says what it returns. The result schema documents that shape for tests and for future browsers. Chrome 156 does not pass that schema on.</p>
 <p>The page also registers two read-only guides. One lists the public pages on this site. The other lists the headings and links on this page. Neither guide reads keys, cookies, or saved chat. The <a href="/widget/webmcp.html">page tools guide</a> explains the same idea for the rest of the site.</p>
 <p id="webmcp-status" class="callout">Your browser does not support WebMCP, so only the chat widget can use these tools. The rest of the page works as usual. To try WebMCP, use Chrome 146 or later. Open <code>chrome://flags/#enable-webmcp-testing</code>, set it to Enabled, and relaunch Chrome. Then open this page with an agent that supports WebMCP, for example the Model Context Tool Inspector extension from Chrome.</p>
 <h2>The safety rule</h2>

@@ -3,8 +3,9 @@
  *   1. the chat widget (data-tools="page" reads window.btwPageTools and sends them to OpenRouter as "tools")
  *   2. an outside browser assistant through WebMCP (document.modelContext.registerTool, feature-detected;
  *      navigator.modelContext is used only as a fallback for older Chromium builds that still had it)
- * The WebMCP object carries outputSchema, examples, and oneOf so an inspector can show the result shape and
- * fill a sample color. The widget copies inputSchema only, then drops keywords strict model validators reject.
+ * The WebMCP object carries outputSchema, examples, and oneOf so tests and future browsers can see the result shape.
+ * Chrome 156 does not pass outputSchema on. It is absent from getTools().
+ * The widget copies inputSchema only, then drops keywords strict model validators reject.
  * Safety: the tools change only the color swatch on this page. Input is checked against a strict hex pattern
  * or a fixed list of color names. Nothing the model sends is ever evaluated or inserted as HTML.
  * Chrome WebMCP annotations that round-trip are readOnlyHint, untrustedContentHint, consequentialHint, and
@@ -26,7 +27,7 @@
   var HEX_PATTERN = "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$";
   var COLOR_EXAMPLE = "#3366ff";
   // Listed in the schema itself so an assistant can see the names before a failed call.
-  var COLOR_HELP = "A hex color (#rgb or #rrggbb, for example " + COLOR_EXAMPLE + ") or one of these CSS color names: " + COLOR_NAMES.join(", ") + ".";
+  var COLOR_HELP = "A hex color (#rgb or #rrggbb, for example " + COLOR_EXAMPLE + ") or one of these CSS color names: " + COLOR_NAMES.join(", ") + ". " + COLOR_EXAMPLE + " is only a sample. The swatch starts at " + DEFAULT + ".";
   var SWATCH_SCHEMA = {
     type: "object", additionalProperties: false, required: ["color", "name", "isDefault"],
     properties: {
@@ -55,7 +56,7 @@
 
   // Returns { hex, name } or { error }. Never throws.
   function parseColor(v) {
-    if (typeof v !== "string") return { error: "color must be a string." };
+    if (typeof v !== "string") return { error: "color must be text." };
     var s = v.trim().toLowerCase();
     if (s.length > 32) return { error: "color is too long." };
     if (HEX_RE.test(s)) {
@@ -68,32 +69,72 @@
 
   var TOOL_SPECS = [
     { name: "set_color", title: "Set the color", readOnly: false,
-      description: "Set the color of the example swatch on this page. Use a hex value such as #3366ff or #f80, or one of the CSS color names listed in the input schema. This action is harmless and you can repeat it. Setting the same color again leaves the swatch as it is.",
+      description: "Set the color of the example swatch on this page. The swatch starts at #1f6feb. Use a hex value such as #3366ff or #f80, or one of the CSS color names listed in the input schema. #3366ff is only a sample. It returns the color now on the swatch. This action is harmless and you can repeat it. Setting the same color again leaves the swatch as it is.",
       inputSchema: { type: "object", additionalProperties: false, required: ["color"],
         properties: { color: {
           type: "string", maxLength: 32, description: COLOR_HELP, default: COLOR_EXAMPLE, examples: [COLOR_EXAMPLE],
-          // First branch carries default and examples so a manual inspector run starts at #3366ff, not "".
+          // First branch carries default and examples so a manual inspector run can fill #3366ff, not "".
+          // #3366ff is only a sample. The swatch starts at #1f6feb.
           oneOf: [
-            { type: "string", title: "Hex color", description: "Hex form #rgb or #rrggbb.", pattern: HEX_PATTERN, default: COLOR_EXAMPLE, examples: [COLOR_EXAMPLE] },
+            { type: "string", title: "Hex color", description: "Hex form #rgb or #rrggbb. #3366ff is only a sample. The swatch starts at #1f6feb.", pattern: HEX_PATTERN, default: COLOR_EXAMPLE, examples: [COLOR_EXAMPLE] },
             { type: "string", title: "CSS color name", description: "One of the allowed CSS color names.", enum: COLOR_NAMES.slice() }
           ]
         } } },
       outputSchema: COLOR_OUTPUT },
     { name: "get_color", title: "Read the color", readOnly: true,
-      description: "Read the current color of the example swatch. This changes nothing and you can call it again.",
+      description: "Read the current color of the example swatch. The swatch starts at #1f6feb. It returns the color now on the swatch. This changes nothing and you can call it again.",
       inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: COLOR_OUTPUT },
     { name: "reset_color", title: "Reset the color", readOnly: false,
-      description: "Put the example swatch back to its starting color. This is harmless and you can repeat it. Calling it again stays on the starting color.",
+      description: "Put the example swatch back to its starting color, #1f6feb. It returns that starting color. This is harmless and you can repeat it. Calling it again stays on the starting color.",
       inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: COLOR_OUTPUT },
   ];
 
+  function typeLabel(t) {
+    if (t === "string") return "text";
+    if (t === "number") return "a number";
+    if (t === "integer") return "a whole number";
+    if (t === "boolean") return "true or false";
+    if (t === "array") return "a list";
+    if (t === "object") return "an object";
+    return "";
+  }
+  function valueMatchesType(v, t) {
+    if (t === "string") return typeof v === "string";
+    if (t === "number") return typeof v === "number" && Number.isFinite(v);
+    if (t === "integer") return typeof v === "number" && Number.isFinite(v) && Math.floor(v) === v;
+    if (t === "boolean") return typeof v === "boolean";
+    if (t === "array") return Array.isArray(v);
+    if (t === "object") return v !== null && typeof v === "object" && !Array.isArray(v);
+    return true;
+  }
+  function typeError(name, schema, value) {
+    if (!schema || typeof schema !== "object") return "";
+    var types = [];
+    if (typeof schema.type === "string") types.push(schema.type);
+    if (!types.length && Array.isArray(schema.oneOf)) {
+      for (var i = 0; i < schema.oneOf.length; i++) if (schema.oneOf[i] && typeof schema.oneOf[i].type === "string") types.push(schema.oneOf[i].type);
+    }
+    if (!types.length) return "";
+    for (var j = 0; j < types.length; j++) if (valueMatchesType(value, types[j])) return "";
+    var labels = [];
+    for (var k = 0; k < types.length; k++) {
+      var label = typeLabel(types[k]);
+      if (label && labels.indexOf(label) < 0) labels.push(label);
+    }
+    return name + " must be " + (labels.join(" or ") || "the right type");
+  }
   function checkInput(spec, input) {
     if (input == null) input = {};
     if (typeof input !== "object" || Array.isArray(input)) return { error: "Input must be a JSON object." };
+    var props = spec.inputSchema.properties || {};
     var keys = Object.keys(input);
-    for (var i = 0; i < keys.length; i++) if (!Object.prototype.hasOwnProperty.call(spec.inputSchema.properties, keys[i])) return { error: "Unknown input field: " + String(keys[i]).slice(0, 40) };
+    for (var i = 0; i < keys.length; i++) if (!Object.prototype.hasOwnProperty.call(props, keys[i])) return { error: "Unknown input field: " + String(keys[i]).slice(0, 40) };
     var req = spec.inputSchema.required || [];
     for (var j = 0; j < req.length; j++) if (!Object.prototype.hasOwnProperty.call(input, req[j])) return { error: "Missing input field: " + req[j] };
+    for (var k = 0; k < keys.length; k++) {
+      var err = typeError(String(keys[k]).slice(0, 40), props[keys[k]], input[keys[k]]);
+      if (err) return { error: err };
+    }
     return { value: input };
   }
   function describe(st) { return { color: st.hex, name: st.name, isDefault: st.hex === DEFAULT }; }
@@ -121,8 +162,9 @@
         return r.result;
       } };
   }
-  // WebMCP tool shape. outputSchema is included for inspectors and newer Chrome. Chrome 157 accepts it and
-  // then omits it from getTools(). Annotations use only the four fields Chrome returns.
+  // WebMCP tool shape. outputSchema documents the result for tests and for future browsers.
+  // Chrome 156 does not pass outputSchema on. It is absent from getTools().
+  // Annotations use only the four fields Chrome returns.
   function annotationsFor(spec) {
     return { readOnlyHint: !!spec.readOnly, consequentialHint: false, untrustedContentHint: false, debugging: false };
   }

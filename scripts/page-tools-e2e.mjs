@@ -49,9 +49,13 @@ const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", hea
   await p.goto(BASE + "/", { waitUntil: "networkidle0" }); await ready(p);
   const r = await exec(p, "get_site_guide", {});
   const blob = JSON.stringify(r);
+  const landing = await exec(p, "get_landing_guide", {});
+  const home = r.result.pages.find((x) => x.path === "/");
   must(r.result && r.result.ok && r.result.pages.some((x) => x.path === "/gotchas"), "landing guide lists the public pages");
+  must(home && /Sign in to see what this browser reveals/.test(home.summary), "home summary says sign-in is needed to see the browser reveal");
+  must(landing.result && landing.result.ok && landing.result.signInNeeded === true && landing.result.signedIn === false, "landing tool says sign-in is needed");
   must(r.readOnly === true && r.consequential === false && r.output === true, "landing tool is read-only with an output schema");
-  must(/read-only tools/.test(r.note), "landing shows a status line only because WebMCP is on");
+  must(/2 read-only tools/.test(r.note) && /get_landing_guide/.test(r.note) && !/1 read-only tools/.test(r.note), "landing note counts both read-only tools");
   must(!SECRET.test(blob) && r.csp.length === 0 && bad.length === 0, "landing leaks nothing and breaks no CSP " + (bad[0] || r.csp[0] || ""));
   await p.close();
 }
@@ -84,7 +88,12 @@ const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", hea
   const blob = JSON.stringify({ sum, one, gotcha });
   must(sum.result.ok && sum.result.meta.version === "2026.10" && sum.result.counts.applicable > 0, "ATLAS summary reports the 2026.10 evaluation");
   must(one.result.ok && one.result.technique.id === "AML.T0051" && /Prompt Injection/.test(one.result.technique.name), "technique lookup returns the public defensive note");
-  must(!one.result.technique.exploit && gotcha.result.ok && gotcha.result.gotcha.id === "llm-js-xss", "gotcha lookup returns the public lesson");
+  must(/id wins if you give both/.test(one.result.note || ""), "lookup says id wins when a code and words are both given");
+  const filtered = await exec(p, "get_atlas_summary", { status: "fixed" });
+  must(filtered.result.ok && filtered.result.status === "fixed" && filtered.result.applicable.length > 0 && filtered.result.applicable.every((row) => row.status === "fixed") && JSON.stringify(filtered.result).length < JSON.stringify(sum.result).length, "ATLAS summary status filter returns a smaller fixed list");
+  const badStatus = await exec(p, "get_atlas_summary", { status: 5 });
+  must(badStatus.result.ok === false && /status must be text/.test(badStatus.result.error), "ATLAS status rejects a number");
+  must(!one.result.technique.exploit && gotcha.result.ok && gotcha.result.gotcha.id === "llm-js-xss" && !gotcha.result.note, "gotcha lookup returns the public lesson and ignores an empty query");
   must(!SECRET.test(blob) && sum.csp.length === 0 && bad.length === 0, "gotchas page leaks nothing " + (bad[0] || ""));
   await p.close();
 }
@@ -108,10 +117,32 @@ const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", hea
   const state = await exec(p, "read_demo_state", { id: "storage_inspector" });
   const blob = JSON.stringify({ cat, state });
   must(cat.result.ok && cat.result.demos[0].id === "storage_inspector" && cat.result.demos[0].needsPermission === false, "demo catalog returns the public demo");
+  const labState = await exec(p, "read_demo_state", { id: "xss_lab" });
+  const allState = await exec(p, "read_demo_state", {});
   must(state.result.ok && state.result.demos[0].hasResult === true && state.result.demos[0].onPage === true, "demo state sees that a result is on screen");
-  must(!SECRET.test(blob), "demo state does not return the on-screen text or any stored secret");
+  must(labState.result.ok && labState.result.demos[0].id === "xss_lab" && labState.result.demos[0].onPage === true, "demo state sees the script injection lab on the page");
+  must(allState.result.ok && allState.result.demos.length === 7 && allState.result.demos.every((d) => d.onPage === true), "omitting the demo code reports all seven demos as on the page");
+  must(!SECRET.test(blob) && !SECRET.test(JSON.stringify(labState)), "demo state does not return the on-screen text or any stored secret");
   must(cat.csp.length === 0 && bad.length === 0, "demos page CSP stays clean " + (bad[0] || ""));
   await p.close();
+}
+
+{
+  const ctx = await b.createBrowserContext();
+  const p = await ctx.newPage(); const bad = watch(p); await prep(p);
+  await p.goto(BASE + "/demos", { waitUntil: "networkidle0" });
+  await p.waitForSelector("#demo-xss_lab", { timeout: 15000 });
+  await ready(p);
+  const state = await exec(p, "read_demo_state", { id: "xss_lab" });
+  const lab = await p.evaluate(async () => {
+    const r = await fetch("/api/lab", { headers: { Accept: "application/json" } });
+    const body = await r.json();
+    return { status: r.status, token: body && body.token };
+  });
+  must(state.result && state.result.ok && state.result.demos[0].onPage === true, "signed-out demo state sees the script injection lab");
+  must(lab.status === 200 && lab.token === null, "signed-out /api/lab returns 200 and no token");
+  must(bad.filter((x) => /401|\/api\/lab/.test(x)).length === 0, "signed-out /demos does not log a lab 401 " + (bad[0] || ""));
+  await ctx.close();
 }
 
 for (const [url, heading] of [["/widget/", "color"], ["/widget/storage.html", "OpenRouter key"], ["/widget/xss.html", "XSS"], ["/widget/openrouter.html", "pays"], ["/widget/privacy.html", "Privacy"], ["/widget/webmcp.html", "browser assistants"], ["/widget/chrome-eval.html", "quality check"]]) {
