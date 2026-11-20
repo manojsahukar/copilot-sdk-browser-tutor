@@ -3,7 +3,7 @@
 <meta name="color-scheme" content="dark light">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="/static/widget-page.css"><title>Tutor Docs — a client-side OpenRouter chat widget</title></head>
-<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/">← Back to tutor</a></nav>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/widget/webmcp.html">Page tools</a><a href="/">← Back to tutor</a></nav>
 <article>
 <h1>A chat widget that runs entirely in your browser</h1>
 <p class="muted">Pilot of the client-side OpenRouter widget — no backend, built to drop into any static GitHub Pages site.</p>
@@ -34,7 +34,7 @@
 <h2>The same tools for an outside assistant (WebMCP)</h2>
 <p>WebMCP is a proposed web standard. It lets a page offer its tools to an AI assistant in the browser, for example a browser agent or an extension.</p>
 <p>This page registers the same three tools with <code>document.modelContext.registerTool()</code>. The widget and WebMCP use the same tool code and the same input rules. The result schema tells an assistant what a successful call and a refused call look like.</p>
-<p>The page also registers two read-only guides. One lists the public pages on this site. The other lists the headings and links on this page. Neither guide reads keys, cookies, or saved chat.</p>
+<p>The page also registers two read-only guides. One lists the public pages on this site. The other lists the headings and links on this page. Neither guide reads keys, cookies, or saved chat. The <a href="/widget/webmcp.html">page tools guide</a> explains the same idea for the rest of the site.</p>
 <p id="webmcp-status" class="callout">Your browser does not support WebMCP, so only the chat widget can use these tools. The rest of the page works as usual. To try WebMCP, use Chrome 146 or later. Open <code>chrome://flags/#enable-webmcp-testing</code>, set it to Enabled, and relaunch Chrome. Then open this page with an agent that supports WebMCP, for example the Model Context Tool Inspector extension from Chrome.</p>
 <h2>The safety rule</h2>
 <p>The tools can change only the color on this page. They cannot read your key, send data or run code.</p>

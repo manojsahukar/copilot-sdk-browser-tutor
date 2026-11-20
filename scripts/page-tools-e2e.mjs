@@ -114,7 +114,7 @@ const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", hea
   await p.close();
 }
 
-for (const [url, heading] of [["/widget/", "color"], ["/widget/storage.html", "OpenRouter key"], ["/widget/xss.html", "XSS"], ["/widget/openrouter.html", "pays"], ["/widget/privacy.html", "Privacy"], ["/widget/chrome-eval.html", "quality check"]]) {
+for (const [url, heading] of [["/widget/", "color"], ["/widget/storage.html", "OpenRouter key"], ["/widget/xss.html", "XSS"], ["/widget/openrouter.html", "pays"], ["/widget/privacy.html", "Privacy"], ["/widget/webmcp.html", "browser assistants"], ["/widget/chrome-eval.html", "quality check"]]) {
   const p = await b.newPage(); const bad = watch(p); await prep(p);
   await p.goto(BASE + url, { waitUntil: "networkidle0" }); await ready(p);
   const r = await exec(p, "get_page_guide", {});
