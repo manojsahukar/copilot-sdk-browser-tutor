@@ -26,8 +26,9 @@
   var COLOR_NAMES = Object.keys(NAMED);
   var HEX_PATTERN = "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$";
   var COLOR_EXAMPLE = "#3366ff";
-  // Listed in the schema itself so an assistant can see the names before a failed call.
-  var COLOR_HELP = "A hex color (#rgb or #rrggbb, for example " + COLOR_EXAMPLE + ") or one of these CSS color names: " + COLOR_NAMES.join(", ") + ". " + COLOR_EXAMPLE + " is only a sample. The swatch starts at " + DEFAULT + ".";
+  // Kept under 150 characters. Inspectors reject a longer field description.
+  // The allowed names stay in the enum below. A bad value still returns allowedNames.
+  var COLOR_HELP = "A hex color (#rgb or #rrggbb) or a CSS color name from the allowed list. " + COLOR_EXAMPLE + " is only a sample. The swatch starts at " + DEFAULT + ".";
   var SWATCH_SCHEMA = {
     type: "object", additionalProperties: false, required: ["color", "name", "isDefault"],
     properties: {
