@@ -1,7 +1,10 @@
 // Fast, offline assertions for the security-critical invariants. Run: node scripts/unit-tests.mjs
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { copilotAuthConfig, _makeTokenProviderForTest, clientOptions, permissionDecision, ALLOWED_TOOLS, providerKeyOf, validateFollowups, _toolsForTest } from "../src/agent.mjs";
+import { GOTCHAS } from "../src/gotchas.mjs";
+import { ATLAS_EVAL } from "../src/atlas.mjs";
 import { parseAllowList, isLoginAllowed } from "../src/logins.mjs";
 import { LAB_LESSONS } from "../src/demos.mjs";
 import { makeVerifier, challengeFor, buildProvider, isAllowedModel, OR_BASE_URL, OR_DEFAULT_MODEL, OR_MODELS, OR_KEY_RE } from "../src/openrouter.mjs";
@@ -22,6 +25,24 @@ ok("rejects shell kind", () => assert.equal(permissionDecision({ kind: "shell", 
 ok("rejects write kind", () => assert.equal(permissionDecision({ kind: "write", toolName: "write_file" }).kind, "reject"));
 ok("rejects empty request", () => assert.equal(permissionDecision(undefined).kind, "reject"));
 ok("allowlist has exactly 10 tools (5 tutor + 5 read-only observability)", () => assert.equal(ALLOWED_TOOLS.size, 10));
+ok("permission-handler gotcha lists exactly ALLOWED_TOOLS, in the same order", () => {
+  const g = GOTCHAS.find((x) => x.id === "permission-handler");
+  const listed = g.app.match(/The names are ([^.]+)\./)[1].replace(/, and /g, ", ").split(", ").map((s) => s.trim());
+  assert.deepEqual(listed, [...ALLOWED_TOOLS]);
+  assert.match(g.app, /exact list of ten/);
+  assert.doesNotMatch(g.app, /only four|five tools|\b5 tools\b/);
+});
+ok("public tool counts do not still say four or five tools", () => {
+  const blob = [
+    ...GOTCHAS.map((g) => g.app),
+    ...ATLAS_EVAL.applicable.map((a) => a.control),
+    fs.readFileSync(new URL("../public/architecture.html", import.meta.url), "utf8"),
+    fs.readFileSync(new URL("../README.md", import.meta.url), "utf8"),
+  ].join("\n");
+  assert.doesNotMatch(blob, /only four custom tools/);
+  assert.doesNotMatch(blob, /five tools|\b5 tools\b/);
+  for (const name of ALLOWED_TOOLS) assert.ok(blob.includes(name), name);
+});
 ok("rejects look-alike write tools", () => { for (const t of ["put_metric", "delete_widget", "run_logs_query", "query_logs_raw"]) assert.equal(permissionDecision({ kind: "custom-tool", toolName: t }).kind, "reject"); });
 
 console.log("openrouter: PKCE S256 code challenge");

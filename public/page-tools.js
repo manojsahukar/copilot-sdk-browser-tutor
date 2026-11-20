@@ -21,7 +21,8 @@
     { path: "/widget/storage.html", title: "Where keys live", summary: "Where the widget keeps an OpenRouter key in this browser." },
     { path: "/widget/xss.html", title: "Script injection risk", summary: "Why a key in the page is exposed if a script is injected." },
     { path: "/widget/openrouter.html", title: "Who pays", summary: "The visitor's own OpenRouter account pays for model calls." },
-    { path: "/widget/privacy.html", title: "Privacy", summary: "What leaves the browser when you chat from the widget." }
+    { path: "/widget/privacy.html", title: "Privacy", summary: "What leaves the browser when you chat from the widget." },
+    { path: "/widget/webmcp.html", title: "Page tools for browser assistants", summary: "How this site offers tools to an assistant in the browser, and how the tutor limits its own tools." }
   ];
   var DEMOS = [
     { id: "storage_inspector", title: "What this site stores in your browser", needsPermission: false, summary: "Shows names and sizes of storage on this site. This tool does not read that storage." },

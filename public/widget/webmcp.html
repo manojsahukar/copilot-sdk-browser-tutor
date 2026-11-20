@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="/static/widget-page.css"><title>Page tools for browser assistants — Tutor Docs</title></head>
+<body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/widget/webmcp.html">Page tools</a><a href="/">← Back to tutor</a></nav>
+<article>
+<h1>Page tools for browser assistants</h1>
+<p class="muted">How this site offers tools to an assistant in the browser, and how the tutor limits the tools on the server.</p>
+
+<h2>What WebMCP is</h2>
+<p>WebMCP is a proposed way for a web page to offer tools to an assistant that runs in the browser. The page calls <code>document.modelContext.registerTool</code>. The assistant can then see the tool and run it.</p>
+<p>In Chrome today this needs a testing flag. Use Chrome 146 or later. Open <code>chrome://flags/#enable-webmcp-testing</code>, set it to Enabled, and relaunch Chrome.</p>
+<p>The assistant does not have to be one this site built. Gemini in Chrome can call the tools. A browser agent can call them. The Model Context Tool Inspector extension can list them and run them by hand.</p>
+
+<h2>What each page offers</h2>
+<p>The read-only tools do not read cookies, web storage, or saved chat. The color tools are the only ones that change the page, and they change only the example color.</p>
+<p>Every page offers <code>get_site_guide</code>. It lists the public pages on this site.</p>
+<p>The signed-in tutor also offers <code>get_browser_reveal</code> and <code>get_connection_reveal</code>. They repeat what the probe page already shows. Cookie values stay hidden.</p>
+<p>The gotchas page also offers <code>get_atlas_summary</code>, <code>lookup_atlas_technique</code>, and <code>lookup_gotcha</code>. ATLAS is the Adversarial Threat Landscape for Artificial-Intelligence Systems from MITRE. The lookup returns the public lesson. It does not include attack steps.</p>
+<p>The architecture page also offers <code>get_architecture_guide</code>. It describes the four diagrams.</p>
+<p>The live demos page also offers <code>get_demo_catalog</code> and <code>read_demo_state</code>. The catalog is a fixed list. The state tool says whether a result is on screen. It does not return that text.</p>
+<p>The widget docs pages also offer <code>get_page_guide</code>. It lists the headings and the links on the page you are reading.</p>
+<p>The widget home page also offers <code>set_color</code>, <code>get_color</code>, and <code>reset_color</code>. They change or read the example color on that page and nothing else.</p>
+
+<h2>One tool definition, two callers</h2>
+<p>Each tool is written once. WebMCP registers that same object with <code>document.modelContext.registerTool</code>.</p>
+<p>The chat widget on these docs pages can use the same object when you are connected to OpenRouter. The widget reads the list and sends the tools with your question.</p>
+<p>Some fields exist so the Model Context Tool Inspector can show a sample input and a result shape. Those fields are <code>outputSchema</code>, <code>annotations</code>, <code>examples</code>, <code>default</code>, and <code>oneOf</code>. The widget removes them before the call reaches OpenRouter. OpenRouter receives the tool name, the description, and a simpler input schema.</p>
+
+<h2>Why the tutor chat does not go through WebMCP</h2>
+<p>The tutor on the main site runs on the server. When the model asks for a tool, the server runs that tool itself. It does not ask the browser to look the tool up through WebMCP.</p>
+<p>The widget does the same kind of thing in the page. When OpenRouter asks for a tool, the widget calls the tool function directly.</p>
+<p>WebMCP is the door for an assistant this site does not own.</p>
+
+<h2>When a server-to-page bridge makes sense</h2>
+<p>A bridge makes sense when the server agent needs a power that only the server has, and also needs to change or read the open page. It also makes sense as a lesson, so you can see both sides of one call.</p>
+<p>This site does not have that bridge yet. Here is how it would work.</p>
+<ol class="steps">
+<li>The server would define a custom tool with the same name as the page action.</li>
+<li>That name would have to be added to the allowed tools list, called ALLOWED_TOOLS in the server code. The permission handler would reject it otherwise.</li>
+<li>The tool would need a strict input schema. The page would check the input again before doing anything.</li>
+<li>The server would send the call to the open tab on the chat stream.</li>
+<li>The page would run the action and post the result back. The server would give that result to the model.</li>
+</ol>
+<p><code>render_widget</code> is the one-way version that already exists. The server tool emits an event. The page draws the chart. The page does not post a tool result back for the drawing itself.</p>
+
+<h2>How the Copilot software development kit limits tools</h2>
+<p>The limits are already written up as gotchas. This page does not repeat them. It only points at them.</p>
+<p>The client runs in empty mode, so the built-in shell and file tools are not available. Each session offers only custom tools. In the kit that setting is <code>availableTools</code> set to <code>custom:*</code>. Read <a href="/gotchas#default-mode-shared-server">Never run the SDK in its default mode on a shared server</a>.</p>
+<p>A permission handler runs before each tool. It denies the request unless the kind is a custom tool and the name is on the fixed list of ten. Read <a href="/gotchas#permission-handler">Every tool call goes through the permission handler: deny by default</a>.</p>
+<p>Each tool checks its input again inside its own handler. A name that passed the list can still be rejected if the arguments are wrong.</p>
+</article></div>
+<script src="/static/page-tools.js"></script>
+<script src="/static/widget.js" data-site-name="Tutor Docs" data-providers="openrouter,huggingface,chrome" data-hf-client-id="bb10112f-2b6d-415b-a6ca-e71957dd0d8e" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json"></script>
+</body></html>
