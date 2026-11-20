@@ -515,6 +515,8 @@
   }
 
   function toolChangesPage(name, ann) {
+    if (name === "set_color_form") return true;
+    if (name === "find_site_page") return false;
     if (ann && ann.readOnlyHint === false) return true;
     if (ann && ann.readOnlyHint === true) return false;
     var specs = G.__btwColor && G.__btwColor.TOOL_SPECS;
@@ -522,6 +524,63 @@
       for (var i = 0; i < specs.length; i++) if (specs[i].name === name) return !specs[i].readOnly;
     }
     return false;
+  }
+  function searchPages(query) {
+    var q = cap(String(query || ""), 80).toLowerCase();
+    if (!q) return [];
+    var words = q.split(/\s+/).filter(Boolean);
+    var hits = [];
+    for (var i = 0; i < SITE_PAGES.length; i++) {
+      var p = SITE_PAGES[i];
+      var hay = (p.title + " " + p.summary + " " + p.path).toLowerCase();
+      var match = true;
+      for (var w = 0; w < words.length; w++) if (hay.indexOf(words[w]) < 0) { match = false; break; }
+      if (match) hits.push({ path: p.path, title: p.title, summary: p.summary });
+    }
+    return hits;
+  }
+  function fillResults(host, pages, query) {
+    while (host.firstChild) host.removeChild(host.firstChild);
+    if (!query) { host.textContent = "Type a word from a page title or summary."; return; }
+    if (!pages.length) { host.textContent = "No public page matches those words."; return; }
+    var intro = document.createElement("span");
+    intro.textContent = pages.length === 1 ? "1 page matches." : pages.length + " pages match.";
+    host.appendChild(intro);
+    var list = document.createElement("ul");
+    for (var i = 0; i < pages.length; i++) {
+      var item = document.createElement("li");
+      var link = document.createElement("a");
+      link.href = pages[i].path;
+      link.textContent = pages[i].title;
+      item.appendChild(link);
+      var note = document.createElement("span");
+      note.textContent = " " + pages[i].summary;
+      item.appendChild(note);
+      list.appendChild(item);
+    }
+    host.appendChild(list);
+  }
+  function replyToAgent(event, value) {
+    if (!event || !event.agentInvoked || typeof event.respondWith !== "function") return;
+    try { event.respondWith(Promise.resolve(value)); } catch (e) {}
+  }
+  function bindSiteFind(doc) {
+    var form = doc.getElementById ? doc.getElementById("site-find") : null;
+    if (!form || form.getAttribute("data-bound") === "1") return;
+    form.setAttribute("data-bound", "1");
+    form.addEventListener("submit", function (event) {
+      if (event && typeof event.preventDefault === "function") event.preventDefault();
+      var input = form.querySelector ? form.querySelector("input[name=q]") : null;
+      var host = doc.getElementById("site-find-results");
+      var query = input ? String(input.value || "") : "";
+      var pages = searchPages(query);
+      if (host) fillResults(host, pages, cap(query, 80));
+      replyToAgent(event, {
+        ok: true,
+        message: pages.length ? "Matching public pages." : (cap(query, 80) ? "No public page matches those words." : "Type a word from a page title or summary."),
+        pages: pages
+      });
+    });
   }
   function namesToList(pageNames, colorNames) {
     var list = [], seen = Object.create(null);
@@ -560,7 +619,7 @@
     summarizeAtlas: summarizeAtlas, lookupAtlas: lookupAtlas, lookupGotcha: lookupGotcha, architectureGuide: architectureGuide,
     demoCatalog: demoCatalog, demoState: demoState, readPage: readPage, pageGuide: pageGuide, landingGuide: landingGuide,
     markersFrom: markersFrom, specList: specList, createTools: createTools, findModelContext: findModelContext, registerWebMCP: registerWebMCP,
-    statusLine: statusLine, ATLAS_STATUS: ATLAS_STATUS
+    statusLine: statusLine, searchPages: searchPages, ATLAS_STATUS: ATLAS_STATUS
   };
   if (!HAS_DOM) return;
 
@@ -621,6 +680,7 @@
   function boot() {
     if (G.__btwPageBooted) return;
     G.__btwPageBooted = true;
+    bindSiteFind(document);
     var markers = markersFrom(document);
     var tools = createTools(markers, { doc: document });
     G.__btwPageTools = tools;

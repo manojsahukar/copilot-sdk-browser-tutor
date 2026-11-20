@@ -2,13 +2,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <meta name="robots" content="noindex">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
-<link rel="stylesheet" href="/static/widget-page.css"><link rel="stylesheet" href="/static/chrome-eval.css"><title>On-device AI quality check — Tutor Docs</title></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'">
+<link rel="stylesheet" href="/static/widget-page.css"><link rel="stylesheet" href="/static/chrome-eval.css"><link rel="webmcp" href="/.well-known/webmcp"><title>On-device AI quality check — Tutor Docs</title></head>
 <body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/privacy.html">Privacy</a><a href="/widget/webmcp.html">Page tools</a><a href="/">← Back to tutor</a></nav>
 <main>
 <h1>On-device AI quality check</h1>
 <p class="muted">A manual test for Chrome's built-in AI (Prompt API). It asks the on-device model 20 questions about these docs, using the same prompt-building code as the chat widget. You compare each answer with the key facts and mark pass or fail. Everything stays on this device: this page only loads files from this site and makes no other network calls.</p>
 <p class="muted">A browser assistant can read a short guide to this page. The guide lists headings only. It does not read answers, keys, cookies, or saved chat.</p>
+<p class="muted">This check looks for <code>LanguageModel</code> and for the older <code>window.ai</code> name. It does not add either one. If this browser does not have them, the questions stay off.</p>
 
 <section class="ev-panel" aria-labelledby="ev-env-h">
 <h2 id="ev-env-h">1. This browser</h2>
@@ -51,7 +52,9 @@
 <label for="ev-text" class="muted">Results text (copy it and paste it back to your assistant)</label>
 <textarea id="ev-text" class="ev-text" rows="10" readonly></textarea>
 </section>
-</main></div>
+</main>
+<footer class="site-find"><form id="site-find" method="get" action="/search" toolname="find_site_page" tooldescription="Find a public page on this site by words in its title or summary." toolaction="Search the public pages and show the matching titles and links on this page. This only reads the public page list."><label for="site-find-q">Find a page on this site</label><input id="site-find-q" type="search" name="q" maxlength="80" autocomplete="off" toolparamdescription="Words from a page title or summary, such as privacy or color."><button type="submit">Search</button><p id="site-find-results" class="site-find-results" role="status"></p></form></footer>
+</div>
 <script src="/static/page-tools.js"></script>
 <script src="/static/widget.js" data-no-ui="1"></script>
 <script src="/static/chrome-eval.js"></script>

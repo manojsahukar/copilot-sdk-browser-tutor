@@ -10,10 +10,23 @@
   function setStatus(t) { $("ev-status").textContent = t; }
   function chromeVer() { var m = /Chrome\/(\d+)\.[\d.]+/.exec(navigator.userAgent); return m ? "Chrome " + m[0].slice(7) : "not Chrome"; }
 
+  // Read the names Chrome has used. Do not create or replace window.ai or LanguageModel.
+  function builtinAi() {
+    var languageModel = false, windowAi = false;
+    try { languageModel = !!(window.LanguageModel && typeof window.LanguageModel.availability === "function"); } catch (e) { languageModel = false; }
+    try {
+      var ai = window.ai;
+      windowAi = !!(ai && (ai.languageModel || typeof ai.canCreateTextSession === "function" || typeof ai.createTextSession === "function" || ai.assistant));
+    } catch (e2) { windowAi = false; }
+    return { languageModel: languageModel, windowAi: windowAi };
+  }
   async function checkEnv() {
+    var detected = builtinAi();
     var has = B && B.chromeCapable();
     $("ev-ua").textContent = chromeVer();
-    $("ev-support").textContent = has ? "available in this browser (LanguageModel found)" : "not found: open this page in desktop Chrome 148 or newer";
+    $("ev-support").textContent = has ? "available in this browser (LanguageModel found)"
+      : (detected.windowAi ? "window.ai is in this browser, but LanguageModel is not. This page needs LanguageModel. Open it in desktop Chrome 148 or newer."
+      : "not found: open this page in desktop Chrome 148 or newer. Checked LanguageModel and window.ai.");
     STATE = has ? await B.chromeAvailability() : "unavailable";
     var label = { available: "ready (model is on this device)", downloadable: "not downloaded yet", downloading: "download in progress or paused",
       unavailable: "unavailable on this device/browser", unknown: "checking…" };
@@ -69,8 +82,10 @@
       lab.appendChild(inp); lab.appendChild(document.createTextNode(v === "pass" ? "Pass" : "Fail")); fs.appendChild(lab);
     });
     card.appendChild(fs);
-    var notes = el("input", "ev-notes"); notes.type = "text"; notes.maxLength = 300; notes.setAttribute("aria-label", "Optional note for question " + q.id); notes.placeholder = "Optional note (what was wrong?)";
-    notes.addEventListener("input", function () { results[i].note = notes.value; }); card.appendChild(notes);
+    var notesLabel = el("label", "ev-notes-label", "Optional note for question " + q.id);
+    var notes = el("input", "ev-notes"); notes.type = "text"; notes.name = "note" + q.id; notes.id = "ev-note-" + q.id; notes.maxLength = 300; notes.placeholder = "Optional note (what was wrong?)";
+    notesLabel.setAttribute("for", notes.id);
+    notes.addEventListener("input", function () { results[i].note = notes.value; }); card.appendChild(notesLabel); card.appendChild(notes);
     run.addEventListener("click", function () { runSome([i]); });
     return { card: card, run: run, meta: meta, ans: ans };
   }
@@ -142,5 +157,5 @@
     summarize(); await checkEnv();
   }
   init();
-  window.__chromeEval = { runSome: runSome, exportText: exportText, state: function () { return STATE; }, results: function () { return results; } };
+  window.__chromeEval = { runSome: runSome, exportText: exportText, builtinAi: builtinAi, state: function () { return STATE; }, results: function () { return results; } };
 })();

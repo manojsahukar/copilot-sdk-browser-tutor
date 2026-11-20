@@ -2,7 +2,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#161b22"><meta name="color-scheme" content="dark">
 <meta name="description" content="How Browser Tutor is built: request flow, GitHub sign-in, the agent's tool loop and its trust boundaries.">
-<title>Architecture — Browser Tutor</title><link rel="stylesheet" href="/static/style.css"></head>
+<title>Architecture — Browser Tutor</title><link rel="stylesheet" href="/static/style.css"><link rel="webmcp" href="/.well-known/webmcp"></head>
 <body class="app">
 <header class="topbar">
   <a class="brand" href="/">🕵️ <span>Browser Tutor</span></a>
@@ -44,5 +44,6 @@
 <p class="muted">Page tools for an assistant in the browser are explained here: <a href="/widget/webmcp.html">Page tools for browser assistants</a>.</p>
 <p class="muted">A browser assistant can read a short guide to these diagrams. The guide does not read cookies, keys, or saved chat.</p>
 </main>
+<footer class="site-find"><form id="site-find" method="get" action="/search" toolname="find_site_page" tooldescription="Find a public page on this site by words in its title or summary." toolaction="Search the public pages and show the matching titles and links on this page. This only reads the public page list."><label for="site-find-q">Find a page on this site</label><input id="site-find-q" type="search" name="q" maxlength="80" autocomplete="off" toolparamdescription="Words from a page title or summary, such as privacy or color."><button type="submit">Search</button><p id="site-find-results" class="site-find-results" role="status"></p></form></footer>
 <script src="/static/page-tools.js"></script>
 </body></html>

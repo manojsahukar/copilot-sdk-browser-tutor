@@ -18,7 +18,7 @@ import { validateSpec } from "./widgets.mjs";
 import { resolveData, recordTurn, recordWeb, userHash, setUserKey, METRICS, ENDPOINTS } from "./metrics.mjs";
 import { readiness } from "./health.mjs";
 import { parseAllowList, isLoginAllowed } from "./logins.mjs";
-import { robotsTxt, sitemapXml, llmsTxt } from "./publicmeta.mjs";
+import { robotsTxt, sitemapXml, llmsTxt, webmcpManifest, searchPublicPages } from "./publicmeta.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "..", "public");
@@ -163,8 +163,8 @@ function metricsRateOk(sid, max = 240) {
 // different CSP than the app's strict "connect-src 'self'": connect to openrouter.ai is allowed.
 // This mirrors the page's own <meta> CSP (on real GitHub Pages only the meta applies — a host that
 // can't set headers; here we also send it as a header, with frame-ancestors, as defence in depth).
-const WIDGET_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-const EVAL_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const WIDGET_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+const EVAL_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const turnLog = new Map();
 // Signed-in routes only. Unknown paths must not reach this list: they are 404 for everyone.
 const AUTH_PATHS = new Set([
@@ -180,6 +180,7 @@ const requiresAuth = (pathname) => AUTH_PATHS.has(pathname);
 const ROBOTS_TXT = robotsTxt();
 const SITEMAP_XML = sitemapXml();
 const LLMS_TXT = llmsTxt();
+const WEBMCP_JSON = JSON.stringify(webmcpManifest());
 function rateOk(sid) {
   const now = Date.now(); const arr = (turnLog.get(sid) || []).filter((t) => now - t < 3600e3);
   if (arr.length >= cfg.maxTurnsPerHour) return false;
@@ -272,6 +273,12 @@ async function handle(req, res) {
   if (p === "/robots.txt") return send(res, 200, ROBOTS_TXT, "text/plain; charset=utf-8");
   if (p === "/sitemap.xml") return send(res, 200, SITEMAP_XML, "application/xml; charset=utf-8");
   if (p === "/llms.txt") return send(res, 200, LLMS_TXT, "text/plain; charset=utf-8");
+  // Public discovery. No sign-in. Built once at startup from the same page and tool list as the files above.
+  if (p === "/.well-known/webmcp") return send(res, 200, WEBMCP_JSON, "application/json; charset=utf-8");
+  if (p === "/search" && req.method === "GET") {
+    const q = url.searchParams.get("q") || "";
+    return send(res, 200, { query: String(q).slice(0, 80), pages: searchPublicPages(q) });
+  }
 
   if (p === "/") return serveStatic(res, sess ? "app.html" : "index.html");
   if (p === "/gotchas" || p === "/gotchas/") return serveStatic(res, "gotchas.html");
