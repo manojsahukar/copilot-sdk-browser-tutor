@@ -35,7 +35,7 @@
 <p>The site publishes a JSON file at <a href="/.well-known/webmcp"><code>/.well-known/webmcp</code></a>. It names the site and lists each public page with the tools on that page. Each tool has a description, the input it accepts, and whether it only reads or can change the page. The same list builds the sitemap and this site's llms.txt file, so the three stay in step. This file is a discovery aid. It is not a formal standard. The tools that matter are the ones the open page registers. Each page also links to that file from its head.</p>
 
 <h2>A form an assistant can fill</h2>
-<p>Every public page has a search form called Find a page on this site. The form uses <code>toolname</code>, <code>tooldescription</code>, and <code>toolaction</code>. The text box uses <code>toolparamdescription</code>, a visible label, and a name. The form is named <code>find_site_page</code>. It searches the public page list and shows the matching titles and links on the page. It does not change the page. It does not read cookies, keys, or saved chat. You can also open <a href="/search?q=privacy"><code>/search</code></a> with a query. That address returns the same public pages as JSON.</p>
+<p>The widget home page has a search form called Find a page on this site. The other pages do not. The form uses <code>toolname</code>, <code>tooldescription</code>, and <code>toolaction</code>. The text box uses <code>toolparamdescription</code>, a visible label, and a name. The form is named <code>find_site_page</code>. It searches the public page list and shows the matching titles and links on that page. It does not change the page. It does not read cookies, keys, or saved chat. The same search is at <a href="/search?q=privacy"><code>/search</code></a>. That address returns the matching public pages as JSON.</p>
 <p>The widget home page also has a color form named <code>set_color_form</code>. It uses the same color check as <code>set_color</code>. You can type a hex color or an allowed color name, or use the picker. The picker and the text box each have a label and a name.</p>
 
 <h2>A person confirms a color change</h2>
@@ -64,9 +64,7 @@
 <p>The client runs in empty mode, so the built-in shell and file tools are not available. Each session offers only custom tools. In the kit that setting is <code>availableTools</code> set to <code>custom:*</code>. Read <a href="/gotchas#default-mode-shared-server">Never run the SDK in its default mode on a shared server</a>.</p>
 <p>A permission handler runs before each tool. It denies the request unless the kind is a custom tool and the name is on the fixed list of ten. Read <a href="/gotchas#permission-handler">Every tool call goes through the permission handler: deny by default</a>.</p>
 <p>Each tool checks its input again inside its own handler. A name that passed the list can still be rejected if the arguments are wrong.</p>
-</article>
-<footer class="site-find"><form id="site-find" method="get" action="/search" toolname="find_site_page" tooldescription="Find a public page on this site by words in its title or summary." toolaction="Search the public pages and show the matching titles and links on this page. This only reads the public page list."><label for="site-find-q">Find a page on this site</label><input id="site-find-q" type="search" name="q" maxlength="80" autocomplete="off" toolparamdescription="Words from a page title or summary, such as privacy or color."><button type="submit">Search</button><p id="site-find-results" class="site-find-results" role="status"></p></form></footer>
-</div>
+</article></div>
 <script src="/static/page-tools.js"></script>
 <script src="/static/widget.js" data-site-name="Tutor Docs" data-providers="openrouter,huggingface,chrome" data-hf-client-id="bb10112f-2b6d-415b-a6ca-e71957dd0d8e" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json"></script>
 </body></html>
