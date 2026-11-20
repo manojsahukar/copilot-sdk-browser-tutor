@@ -100,6 +100,56 @@ await ok("get_color reads, reset_color restores the default; input state not mut
   assert.equal(C.runTool(t, "get_color", undefined).result.swatch.color, "#ff7f50");
   assert.equal(C.runTool(t, "reset_color", {}).state.hex, C.DEFAULT); assert.equal(s0.hex, C.DEFAULT);
 });
+await ok("agent color-form submit asks for confirm and does not change the swatch", () => {
+  const ctl = C.createController();
+  let shown = null;
+  const ev = { agentInvoked: true, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, replied: null, respondWith(p) { this.replied = p; } };
+  const out = C.handleColorFormSubmit(ev, {
+    value: "teal",
+    call: (name, input, source) => ctl.call(name, input, source),
+    showConfirm(color) { shown = color; },
+    reply(event, value) { event.respondWith(Promise.resolve(value)); },
+  });
+  assert.equal(ev.defaultPrevented, true);
+  assert.equal(out.confirm, true);
+  assert.equal(out.changed, false);
+  assert.equal(shown, "teal");
+  assert.equal(ctl.getState().hex, C.DEFAULT);
+  assert.equal(ev.replied, null);
+});
+await ok("cancelling an agent color change leaves the swatch unchanged", () => {
+  const ctl = C.createController();
+  const ev = { agentInvoked: true, preventDefault() {}, respondWith() {} };
+  C.handleColorFormSubmit(ev, { value: "#ff8800", call: (name, input, source) => ctl.call(name, input, source), showConfirm() {}, reply() {} });
+  assert.equal(ctl.getState().hex, C.DEFAULT);
+});
+await ok("a bad agent color does not confirm and does not change the swatch", () => {
+  const ctl = C.createController();
+  let shown = false;
+  const ev = { agentInvoked: true, preventDefault() {}, replied: null, respondWith(p) { this.replied = p; } };
+  const out = C.handleColorFormSubmit(ev, {
+    value: "not-a-color",
+    call: (name, input, source) => ctl.call(name, input, source),
+    showConfirm() { shown = true; },
+    reply(event, value) { event.respondWith(Promise.resolve(value)); },
+  });
+  assert.equal(shown, false);
+  assert.equal(out.confirm, false);
+  assert.match(out.result.error, /Not a valid color/);
+  assert.equal(ctl.getState().hex, C.DEFAULT);
+});
+await ok("a person submitting the color form applies it without a confirm step", () => {
+  const ctl = C.createController();
+  const ev = { agentInvoked: false, preventDefault() {} };
+  const out = C.handleColorFormSubmit(ev, {
+    value: "teal",
+    call: (name, input, source) => ctl.call(name, input, source),
+    showConfirm() { throw new Error("a person should not be asked to confirm"); },
+  });
+  assert.equal(out.confirm, false);
+  assert.equal(out.changed, true);
+  assert.equal(ctl.getState().hex, "#008080");
+});
 await ok("controller: onChange fires with the source; failed calls do not change it", () => {
   const seen = []; const ctl = C.createController((st, ev) => seen.push([st.hex, ev.source, ev.name]));
   ctl.call("set_color", { color: "nope" }, "X"); assert.equal(seen.length, 0);

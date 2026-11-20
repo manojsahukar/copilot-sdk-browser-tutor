@@ -58,6 +58,29 @@ must(/chrome:\/\/flags\/#enable-webmcp-testing/.test(s1.status) && /Chrome 146/.
 must(s1.tools.join() === "set_color,get_color,reset_color,get_site_guide,get_page_guide", "window.btwPageTools exposes the color tools and the read-only guides");
 await p.click('#color-demo button[data-tool="reset_color"]'); await sleep(100);
 must(await p.evaluate(() => /You called reset_color/.test(document.querySelector(".cp-log").textContent)), "Reset button runs reset_color and logs it");
+await p.evaluate(() => {
+  document.querySelector(".cp-text").value = "#ff8800";
+  const ev = new Event("submit", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "agentInvoked", { value: true });
+  document.getElementById("color-form").dispatchEvent(ev);
+});
+const asked = await p.evaluate(() => ({
+  color: document.getElementById("color-demo").dataset.color,
+  hidden: document.getElementById("color-confirm").hidden,
+  text: document.getElementById("color-confirm-text").textContent,
+  agent: document.getElementById("color-form").hasAttribute("agentinvoked"),
+}));
+must(asked.color === "#1f6feb" && asked.hidden === false && /Confirm/.test(asked.text) && /Cancel/.test(asked.text) && asked.agent, "agent submit shows confirm and does not change the swatch");
+await p.click("#color-confirm-no");
+must(await p.evaluate(() => document.getElementById("color-demo").dataset.color === "#1f6feb" && document.getElementById("color-confirm").hidden === true), "cancel leaves the swatch unchanged");
+await p.evaluate(() => {
+  document.querySelector(".cp-text").value = "teal";
+  const ev = new Event("submit", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "agentInvoked", { value: true });
+  document.getElementById("color-form").dispatchEvent(ev);
+});
+await p.click("#color-confirm-yes");
+must(await p.evaluate(() => document.getElementById("color-demo").dataset.color === "#008080"), "confirm applies the assistant color");
 await p.click(".btw-fab"); await sleep(300);
 await p.evaluate(() => { document.querySelector(".btw-input").value = "Make the color teal"; window.__btwUI.submit(); });
 await p.waitForFunction(() => { const m = [...document.querySelectorAll(".btw-assistant")].pop(); return m && /now teal/.test(m.textContent); }, { timeout: 10000 });
@@ -147,7 +170,7 @@ const w = await p.evaluate(async () => {
 });
 must(w.has && !w.nav, "document.modelContext exists (navigator.modelContext does not in this Chrome)");
 must(w.status === "registered" && w.pageStatus === "registered", "color tools and page tools both register (" + w.status + " / " + w.pageStatus + ")");
-must(JSON.stringify(w.names) === '["get_color","get_page_guide","get_site_guide","reset_color","set_color"]', "getTools() lists the color tools and the read-only guides");
+must(JSON.stringify(w.names) === '["find_site_page","get_color","get_page_guide","get_site_guide","reset_color","set_color","set_color_form"]', "getTools() lists the color tools, the read-only guides, and the declarative forms");
 must(w.readOnly === true && w.guideReadOnly === true, "get_color and get_page_guide are annotated readOnlyHint");
 must(w.consequential === false, "set_color consequentialHint is false (" + w.consequential + ")");
 must(w.namesInSchema === 31 && w.pageOutput === true, "set_color input lists 31 names and the page tool carries outputSchema");
@@ -157,7 +180,7 @@ must(w.bad.ok === false && /Not a valid color/.test(w.bad.error) && Array.isArra
 must(w.get.ok === true && w.get.swatch.color === "#ff8800", "get_color reads the current color");
 must(w.templated.ok === true && w.afterTemplate === "#3366ff", "inspector sample input changes the swatch to #3366ff");
 must(w.guide.ok === true && /[Kk]eys, cookies/.test(w.guide.message), "get_page_guide runs and says it does not read keys or cookies");
-must(/3 read-only tools/.test(w.note) && /2 tools change the page/.test(w.note) && /set_color/.test(w.note) && /reset_color/.test(w.note) && /get_color/.test(w.note) && !/cookie=|sk-or-/.test(w.note), "status line counts every tool and names the ones that change the page");
+must(/4 read-only tools/.test(w.note) && /find_site_page/.test(w.note) && /3 tools change the page/.test(w.note) && /set_color_form/.test(w.note) && /set_color/.test(w.note) && /reset_color/.test(w.note) && /get_color/.test(w.note) && !/cookie=|sk-or-/.test(w.note), "status line counts every tool and names the ones that change the page");
 must(/WebMCP is on/.test(w.statusText) && /wm-on/.test(w.statusCls), "status text says WebMCP is on");
 must(/WebMCP agent called set_color/.test(w.log), "page log credits the WebMCP agent");
 await p.evaluate(() => document.getElementById("color-demo").scrollIntoView({ block: "start" }));

@@ -1,8 +1,8 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
-<link rel="stylesheet" href="/static/widget-page.css"><title>Tutor Docs — a client-side OpenRouter chat widget</title></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'">
+<link rel="stylesheet" href="/static/widget-page.css"><link rel="webmcp" href="/.well-known/webmcp"><title>Tutor Docs — a client-side OpenRouter chat widget</title></head>
 <body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/widget/webmcp.html">Page tools</a><a href="/">← Back to tutor</a></nav>
 <article>
 <h1>A chat widget that runs entirely in your browser</h1>
@@ -15,10 +15,24 @@
 <p>Try asking: <em>"Where is my OpenRouter key stored?"</em>, <em>"Why is a client-side key an XSS risk?"</em>, or <em>"Who pays for the model calls?"</em> — the answer should link to the matching page.</p>
 <h2>Try a tool call: the chat can change this color</h2>
 <p>The chat can do more than answer questions. It can also change the color below. The swatch starts at #1f6feb. Connect OpenRouter, then ask for a change, for example <em>"Make it teal"</em> or <em>"Set the color to #ff8800"</em>. A sample you may see in a tool form is #3366ff. That sample is not the starting color.</p>
-<div id="color-demo" class="color-demo">
+<div id="color-demo" class="color-demo" data-human-in-the-loop="set_color reset_color" data-requires-confirmation="set_color reset_color" data-confirm="The color form asks a person to confirm when an assistant submits it. A direct set_color or reset_color tool call still applies at once.">
 <div class="cp-swatch" role="img" aria-label="Example color swatch"></div>
-<div class="cp-row"><label>Pick a color <input class="cp-input" type="color" value="#1f6feb"></label><button type="button" data-tool="reset_color">Reset color</button></div>
+<form id="color-form" class="cp-row" method="post" action="/widget/" toolname="set_color_form" tooldescription="Set the example color on this page. The swatch starts at #1f6feb. Use a hex color or an allowed CSS color name." toolaction="Change the example swatch after a person confirms. A direct set_color or reset_color tool call still applies at once." agentinvoked="" data-confirm="Confirm before an assistant changes the color." data-requires-confirmation="true" data-human-in-the-loop="true">
+<label for="color-text">Color</label>
+<input id="color-text" class="cp-text" type="text" name="color" maxlength="32" value="#1f6feb" autocomplete="off" spellcheck="false" toolparamdescription="A hex color such as #ff8800 or #f80, or a CSS color name such as teal. The swatch starts at #1f6feb. #3366ff is only a sample.">
+<label for="color-picker">Pick a color</label>
+<input id="color-picker" class="cp-input" type="color" name="picked" value="#1f6feb" toolparamdescription="A hex color from the picker. It fills the color box. The swatch starts at #1f6feb.">
+<button type="submit">Set color</button>
+<button type="button" data-tool="reset_color">Reset color</button>
+<div id="color-confirm" class="cp-confirm" hidden>
+<p id="color-confirm-text"></p>
+<button type="button" id="color-confirm-yes">Confirm</button>
+<button type="button" id="color-confirm-no">Cancel</button>
+</div>
+<p id="color-form-note" class="cp-note" role="status"></p>
+</form>
 <p class="cp-caption" aria-live="polite">Color: #1f6feb</p>
+<p class="muted">If an assistant submits this form, confirm or cancel before the color changes. A direct set_color or reset_color tool call still applies at once.</p>
 <p class="cp-log-h">Recent tool calls</p>
 <ol class="cp-log" aria-live="polite"></ol>
 </div>
@@ -44,7 +58,9 @@
 <h2>Security model</h2>
 <p>The pilot pages are locked down with a <strong>meta-tag CSP</strong>: <code>script-src 'self'</code> and <code>connect-src 'self' https://openrouter.ai</code>, with no inline scripts, no inline styles and no eval. Model output is rendered through the vendored <code>marked</code> + <code>DOMPurify</code> pipeline, so a hostile reply cannot inject script. See the linked pages for where the key lives, the XSS trade-off, and who pays.</p>
 <div class="callout">This widget is deliberately separate from the Browser Tutor's own server-side OpenRouter session. It uses its own <code>btw_*</code> sessionStorage keys and never touches the tutor's login cookie or saved chat.</div>
-</article></div>
+</article>
+<footer class="site-find"><form id="site-find" method="get" action="/search" toolname="find_site_page" tooldescription="Find a public page on this site by words in its title or summary." toolaction="Search the public pages and show the matching titles and links on this page. This only reads the public page list."><label for="site-find-q">Find a page on this site</label><input id="site-find-q" type="search" name="q" maxlength="80" autocomplete="off" toolparamdescription="Words from a page title or summary, such as privacy or color."><button type="submit">Search</button><p id="site-find-results" class="site-find-results" role="status"></p></form></footer>
+</div>
 <script src="/widget/color-tools.js"></script>
 <script src="/static/page-tools.js"></script>
 <script src="/static/widget.js" data-tools="page" data-site-name="Tutor Docs" data-providers="openrouter,huggingface,chrome" data-hf-client-id="bb10112f-2b6d-415b-a6ca-e71957dd0d8e" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json" data-suggestions='["Make the color teal","Set the color to #ff8800","Where does my OpenRouter key live?","Can a reply inject a script?"]'></script>

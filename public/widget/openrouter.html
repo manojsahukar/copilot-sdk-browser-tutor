@@ -1,8 +1,8 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'">
-<link rel="stylesheet" href="/static/widget-page.css"><title>Who pays for the model — Tutor Docs</title></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'">
+<link rel="stylesheet" href="/static/widget-page.css"><link rel="webmcp" href="/.well-known/webmcp"><title>Who pays for the model — Tutor Docs</title></head>
 <body><div class="wrap"><nav class="site"><span class="brand">📘 Tutor Docs</span><a href="/widget/">Home</a><a href="/widget/storage.html">Where keys live</a><a href="/widget/xss.html">XSS risk</a><a href="/widget/openrouter.html">OpenRouter billing</a><a href="/widget/privacy.html">Privacy</a><a href="/widget/webmcp.html">Page tools</a><a href="/">← Back to tutor</a></nav>
 <article>
 <h1>Who pays for the model calls</h1>
@@ -13,7 +13,9 @@
 <p>Because there is no server, the only cost exposure is the visitor's own key. There is no shared budget to drain and no server-side rate limit to tune; the natural limit is each visitor's own credits and OpenRouter's own per-key limits.</p>
 <div class="callout">To stop spending, tap <strong>Disconnect</strong> (which drops the key from this tab) and revoke the key at <code>openrouter.ai/settings/keys</code>.</div>
 <p class="muted">A browser assistant can read a short guide to this page. The guide lists headings and the other docs pages. It does not read keys, cookies, or saved chat.</p>
-</article></div>
+</article>
+<footer class="site-find"><form id="site-find" method="get" action="/search" toolname="find_site_page" tooldescription="Find a public page on this site by words in its title or summary." toolaction="Search the public pages and show the matching titles and links on this page. This only reads the public page list."><label for="site-find-q">Find a page on this site</label><input id="site-find-q" type="search" name="q" maxlength="80" autocomplete="off" toolparamdescription="Words from a page title or summary, such as privacy or color."><button type="submit">Search</button><p id="site-find-results" class="site-find-results" role="status"></p></form></footer>
+</div>
 <script src="/static/page-tools.js"></script>
 <script src="/static/widget.js" data-site-name="Tutor Docs" data-providers="openrouter,huggingface,chrome" data-hf-client-id="bb10112f-2b6d-415b-a6ca-e71957dd0d8e" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json"></script>
 </body></html>

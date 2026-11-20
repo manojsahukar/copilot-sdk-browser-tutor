@@ -996,7 +996,8 @@
       sheet.insertBefore(dlWrap, remWrap);
     }
     var remWrap = h("label", "btw-remember");
-    var rem = document.createElement("input"); rem.type = "checkbox"; rem.checked = lget(K_REMEMBER) === "1";
+    var rem = document.createElement("input"); rem.type = "checkbox"; rem.name = "remember"; rem.id = "btw-remember"; rem.checked = lget(K_REMEMBER) === "1";
+    remWrap.setAttribute("for", "btw-remember");
     var remTxt = h("span", null, "Remember on this device for 7 days (stores the key in localStorage: any script on this site could read it until it expires — only on your own device).");
     remWrap.appendChild(rem); remWrap.appendChild(remTxt);
     var dbgEl = null;

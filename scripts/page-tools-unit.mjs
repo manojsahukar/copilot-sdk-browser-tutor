@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { webcrypto } from "node:crypto";
 import { ATLAS_EVAL } from "../src/atlas.mjs";
 import { GOTCHAS } from "../src/gotchas.mjs";
-import { llmsTxt, publicPages, robotsTxt, sitemapXml, webmcpTools } from "../src/publicmeta.mjs";
+import { FIND_PAGE_TOOL, SET_COLOR_FORM_TOOL, llmsTxt, publicPages, robotsTxt, searchPublicPages, sitemapXml, webmcpManifest, webmcpTools } from "../src/publicmeta.mjs";
 
 const load = (rel) => {
   const ctx = { console, URL, AbortController, TextEncoder, TextDecoder, crypto: webcrypto,
@@ -351,6 +351,8 @@ await ok("signed-out /api/lab returns a null token before the sign-in gate", () 
   assert.ok(src.indexOf('p === "/robots.txt"') < gate);
   assert.ok(src.indexOf('p === "/sitemap.xml"') < gate);
   assert.ok(src.indexOf('p === "/llms.txt"') < gate);
+  assert.ok(src.indexOf('p === "/.well-known/webmcp"') < gate);
+  assert.ok(src.indexOf('p === "/search"') < gate);
 });
 await ok("the page-tools guide matches the tools and says Chrome 156 drops outputSchema", () => {
   const html = fs.readFileSync(new URL("../public/widget/webmcp.html", import.meta.url), "utf8");
@@ -389,6 +391,19 @@ await ok("every public page loads page-tools.js and has no inline script, handle
     assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)/i, file);
     assert.doesNotMatch(html, /\son[a-z]+=/i, file);
     assert.doesNotMatch(html, /\sstyle=/i, file);
+    const metaCsp = html.match(/Content-Security-Policy" content="([^"]+)"/);
+    if (metaCsp) {
+      assert.doesNotMatch(metaCsp[1], /unsafe-inline/, file);
+      assert.match(metaCsp[1], /script-src 'self'/, file);
+    }
+    assert.match(html, /rel="webmcp" href="\/\.well-known\/webmcp"/, file);
+    assert.match(html, /<form\b[^>]*\btoolname="find_site_page"[^>]*>/, file);
+    assert.match(html, new RegExp('tooldescription="' + FIND_PAGE_TOOL.description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"'), file);
+    assert.match(html, new RegExp('toolaction="' + FIND_PAGE_TOOL.toolaction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"'), file);
+    assert.match(html, /<label\b[^>]*\bfor="site-find-q"/, file);
+    assert.match(html, /<input\b[^>]*\bname="q"[^>]*\btoolparamdescription="/, file);
+    const qDesc = FIND_PAGE_TOOL.inputSchema.properties.q.description;
+    assert.ok(html.includes('toolparamdescription="' + qDesc + '"'), file);
   }
 });
 
@@ -417,6 +432,70 @@ await ok("sitemap and llms.txt come from the public page list and the real tool 
     assert.ok(llms.includes(t.line), t.name);
   }
   for (const name of ["get_site_guide", "get_landing_guide", "set_color", "get_color", "reset_color", "lookup_gotcha"]) assert.ok(tools.some((t) => t.name === name), name);
+  assert.match(llms, /\/\.well-known\/webmcp/);
+  assert.match(llms, /find_site_page/);
+  assert.match(llms, /set_color_form/);
+  const manifest = webmcpManifest();
+  assert.equal(manifest.name, "Browser Tutor");
+  assert.match(manifest.description, /what your browser tells a website/);
+  assert.equal(manifest.url, "https://copilot-sdk.demo.curiosta.com/");
+  assert.match(manifest.version, /\d/);
+  assert.match(manifest.spec, /not a formal standard/);
+  assert.deepEqual(manifest.pages.map((p) => p.path), PUBLIC_PATHS);
+  const listed = new Map();
+  for (const page of manifest.pages) {
+    assert.equal(page.url, "https://copilot-sdk.demo.curiosta.com" + (page.path === "/" ? "/" : page.path));
+    assert.ok(page.tools.some((t) => t.name === "find_site_page" && t.source === "declarative" && t.annotations.readOnlyHint === true && t.annotations.changesPage === false), page.path);
+    for (const tool of page.tools) {
+      assert.equal(tool.inputSchema.type, "object");
+      assert.equal(typeof tool.annotations.readOnlyHint, "boolean");
+      assert.equal(tool.annotations.changesPage, !tool.annotations.readOnlyHint);
+      listed.set(tool.name, tool);
+    }
+  }
+  for (const tool of tools) {
+    const row = listed.get(tool.name);
+    assert.ok(row, tool.name);
+    assert.equal(row.description.length > tool.line.length - 1, true, tool.name);
+    assert.ok(row.description.startsWith(tool.line.replace(/\.$/, "")) || row.description.includes(tool.line.replace(/\.$/, "")), tool.name);
+  }
+  for (const spec of Object.values(P.SPECS)) {
+    const row = listed.get(spec.name);
+    assert.equal(row.description, spec.description, spec.name);
+    assert.equal(JSON.stringify(row.inputSchema), JSON.stringify(spec.inputSchema), spec.name);
+    assert.equal(row.annotations.changesPage, false, spec.name);
+  }
+  const color = load("../public/widget/color-tools.js").__btwColor;
+  for (const spec of color.TOOL_SPECS) {
+    const row = listed.get(spec.name);
+    assert.equal(row.description, spec.description, spec.name);
+    assert.equal(JSON.stringify(row.inputSchema), JSON.stringify(spec.inputSchema), spec.name);
+    assert.equal(row.annotations.changesPage, !spec.readOnly, spec.name);
+  }
+  const colorForm = listed.get("set_color_form");
+  assert.equal(colorForm.description, SET_COLOR_FORM_TOOL.description);
+  assert.equal(colorForm.annotations.changesPage, true);
+  assert.equal(manifest.pages.find((p) => p.path === "/widget/").tools.some((t) => t.name === "set_color_form"), true);
+  assert.equal(manifest.pages.filter((p) => p.path !== "/widget/").every((p) => !p.tools.some((t) => t.name === "set_color")), true);
+  assert.equal(JSON.stringify(searchPublicPages("privacy").map((p) => p.path)), JSON.stringify(["/widget/privacy.html"]));
+  assert.equal(JSON.stringify(searchPublicPages("")), "[]");
+  assert.equal(P.searchPages("color").some((p) => p.path === "/widget/"), true);
+  const widgetHtml = fs.readFileSync(new URL("../public/widget/index.html", import.meta.url), "utf8");
+  assert.match(widgetHtml, /toolname="set_color_form"/);
+  assert.match(widgetHtml, /agentinvoked/);
+  assert.match(widgetHtml, /data-confirm=/);
+  assert.match(widgetHtml, /data-requires-confirmation=/);
+  assert.match(widgetHtml, /data-human-in-the-loop="set_color reset_color"/);
+  assert.match(widgetHtml, /<label\b[^>]*\bfor="color-text"/);
+  assert.match(widgetHtml, /<input\b[^>]*\bname="color"/);
+  assert.match(widgetHtml, /<label\b[^>]*\bfor="color-picker"/);
+  assert.match(widgetHtml, /<input\b[^>]*\bclass="cp-input"[^>]*\bname="picked"/);
+  assert.match(fs.readFileSync(new URL("../public/widget.js", import.meta.url), "utf8"), /rem\.name = "remember"/);
+  assert.match(fs.readFileSync(new URL("../public/chrome-eval.js", import.meta.url), "utf8"), /window\.ai/);
+  assert.doesNotMatch(fs.readFileSync(new URL("../public/chrome-eval.js", import.meta.url), "utf8"), /window\.ai\s*=/);
+  const serverSrc = fs.readFileSync(new URL("../src/server.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(serverSrc, /unsafe-inline/);
+  assert.match(serverSrc, /script-src 'self'/);
 });
 
 await ok("missing paths are 404, protected routes stay 401, and discovery files need no auth", async () => {
@@ -496,6 +575,31 @@ await ok("missing paths are 404, protected routes stay 401, and discovery files 
     assert.equal(llms.status, 200);
     assert.match(llms.headers.get("content-type") || "", /^text\/plain/);
     assert.equal(await llms.text(), llmsTxt());
+    const manifestRes = await fetch(base + "/.well-known/webmcp");
+    headersOf(manifestRes);
+    assert.equal(manifestRes.status, 200);
+    assert.match(manifestRes.headers.get("content-type") || "", /^application\/json/);
+    assert.doesNotMatch(manifestRes.headers.get("content-security-policy") || "", /unsafe-inline/);
+    assert.match(manifestRes.headers.get("content-security-policy") || "", /script-src 'self'/);
+    const manifestBody = await manifestRes.json();
+    assert.deepEqual(manifestBody, webmcpManifest());
+    const manifestNames = new Set(manifestBody.pages.flatMap((p) => p.tools.map((t) => t.name)));
+    for (const tool of webmcpTools()) assert.ok(manifestNames.has(tool.name), tool.name);
+    assert.ok(manifestNames.has("find_site_page"));
+    assert.ok(manifestNames.has("set_color_form"));
+    const search = await fetch(base + "/search?q=privacy");
+    headersOf(search);
+    assert.equal(search.status, 200);
+    assert.match(search.headers.get("content-type") || "", /^application\/json/);
+    assert.equal(JSON.stringify(await search.json()), JSON.stringify({ query: "privacy", pages: searchPublicPages("privacy") }));
+    const home = await fetch(base + "/");
+    headersOf(home);
+    assert.equal(home.status, 200);
+    const homeHtml = await home.text();
+    assert.match(homeHtml, /toolname="find_site_page"/);
+    assert.match(homeHtml, /tooldescription="/);
+    assert.match(homeHtml, /toolaction="/);
+    assert.doesNotMatch(home.headers.get("content-security-policy") || "", /unsafe-inline/);
     const login = await fetch(base + "/auth/dev", { method: "POST", headers: { Origin: base } });
     assert.equal(login.status, 200);
     const setCookie = typeof login.headers.getSetCookie === "function" ? login.headers.getSetCookie() : [login.headers.get("set-cookie")];

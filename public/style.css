@@ -353,3 +353,14 @@ table.threats tbody th{font-weight:600;color:#e6edf3;width:42%}
 .atlas-gotcha-row{display:flex;flex-wrap:wrap;gap:6px}
 .atlas-gotcha{display:inline-flex;align-items:center;min-height:36px;padding:4px 10px;border-radius:999px;border:1px solid #30363d;background:#0d1117;color:#58a6ff;text-decoration:none;font-size:12px}
 .atlas-gotcha:hover{border-color:#58a6ff}
+
+/* Find-a-page form. Present on every public page for people and for assistants. */
+.site-find{margin:24px auto 0;max-width:1200px;padding:16px max(12px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));border-top:1px solid #30363d;font-family:system-ui,sans-serif}
+.site-find form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.site-find label{font-weight:600}
+.site-find input[type="search"]{flex:1 1 180px;min-height:44px;min-width:0;padding:8px 12px;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:#c9d1d9;font:inherit;font-size:16px}
+.site-find button{min-height:44px;padding:8px 16px;border-radius:8px;border:0;background:#238636;color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.site-find-results{flex:1 0 100%;margin:8px 0 0}
+.site-find-results ul{margin:6px 0 0;padding-left:1.2em}
+.site-find-results li{margin:4px 0}
+.narrow .site-find{padding-left:0;padding-right:0}
