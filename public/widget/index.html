@@ -24,7 +24,7 @@
 </div>
 <h2>How the tool call works</h2>
 <ol class="steps">
-<li>This page defines three tools in JavaScript: <code>set_color</code>, <code>get_color</code> and <code>reset_color</code>. Each tool has a name, a short description and a JSON schema for its input.</li>
+<li>This page defines three tools in JavaScript: <code>set_color</code>, <code>get_color</code> and <code>reset_color</code>. Each tool has a name, a short description, a JSON schema for its input, and a schema for the result. <code>set_color</code> lists the hex form and the allowed color names in that input schema.</li>
 <li>When you send a message, the widget sends the tool list to OpenRouter together with your question.</li>
 <li>If the model wants to change the color, it replies with a tool call. A tool call is a tool name and its arguments in JSON.</li>
 <li>The widget runs the tool in your browser, and the color changes. The chat shows the tool name, the arguments and the result.</li>
@@ -33,11 +33,12 @@
 <p>The widget stops after four rounds of tool calls. Tool calls work only with the OpenRouter provider. With the other providers, the chat answers with text only. Some free models cannot use tools. If you get an error, send the message again or pick another model.</p>
 <h2>The same tools for an outside assistant (WebMCP)</h2>
 <p>WebMCP is a proposed web standard. It lets a page offer its tools to an AI assistant in the browser, for example a browser agent or an extension.</p>
-<p>This page registers the same three tools with <code>document.modelContext.registerTool()</code>. The widget and WebMCP use the same tool code and the same input rules.</p>
+<p>This page registers the same three tools with <code>document.modelContext.registerTool()</code>. The widget and WebMCP use the same tool code and the same input rules. The result schema tells an assistant what a successful call and a refused call look like.</p>
+<p>The page also registers two read-only guides. One lists the public pages on this site. The other lists the headings and links on this page. Neither guide reads keys, cookies, or saved chat.</p>
 <p id="webmcp-status" class="callout">Your browser does not support WebMCP, so only the chat widget can use these tools. The rest of the page works as usual. To try WebMCP, use Chrome 146 or later. Open <code>chrome://flags/#enable-webmcp-testing</code>, set it to Enabled, and relaunch Chrome. Then open this page with an agent that supports WebMCP, for example the Model Context Tool Inspector extension from Chrome.</p>
 <h2>The safety rule</h2>
 <p>The tools can change only the color on this page. They cannot read your key, send data or run code.</p>
-<p>The color must be a hex value or a name from a fixed list. If the input is not valid, the tool returns an error and changes nothing.</p>
+<p>The color must be a hex value or a name from a fixed list of 31 CSS color names. That list is part of the tool input, so an assistant can read it before calling the tool. If the input is not valid, the tool returns an error and changes nothing.</p>
 <p>The page never runs code that the model writes. The model can only choose a tool from the list and give its arguments.</p>
 <p>The chat shows each tool call as plain text, not as HTML. A tool result cannot add a script to the page.</p>
 <h2>Security model</h2>
@@ -45,5 +46,6 @@
 <div class="callout">This widget is deliberately separate from the Browser Tutor's own server-side OpenRouter session. It uses its own <code>btw_*</code> sessionStorage keys and never touches the tutor's login cookie or saved chat.</div>
 </article></div>
 <script src="/widget/color-tools.js"></script>
+<script src="/static/page-tools.js"></script>
 <script src="/static/widget.js" data-tools="page" data-site-name="Tutor Docs" data-providers="openrouter,huggingface,chrome" data-hf-client-id="bb10112f-2b6d-415b-a6ca-e71957dd0d8e" data-context-selector="article" data-default-model="openrouter/free" data-index="/widget/site-index.json" data-suggestions='["Make the color teal","Set the color to #ff8800","Where does my OpenRouter key live?","Can a reply inject a script?"]'></script>
 </body></html>

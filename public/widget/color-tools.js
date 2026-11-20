@@ -3,8 +3,13 @@
  *   1. the chat widget (data-tools="page" reads window.btwPageTools and sends them to OpenRouter as "tools")
  *   2. an outside browser assistant through WebMCP (document.modelContext.registerTool, feature-detected;
  *      navigator.modelContext is used only as a fallback for older Chromium builds that still had it)
+ * The WebMCP object carries outputSchema, examples, and oneOf so an inspector can show the result shape and
+ * fill a sample color. The widget copies inputSchema only, then drops keywords strict model validators reject.
  * Safety: the tools change only the color swatch on this page. Input is checked against a strict hex pattern
- * or a fixed list of color names. Nothing the model sends is ever evaluated or inserted as HTML. */
+ * or a fixed list of color names. Nothing the model sends is ever evaluated or inserted as HTML.
+ * Chrome WebMCP annotations that round-trip are readOnlyHint, untrustedContentHint, consequentialHint, and
+ * debugging. There is no idempotent flag. Repeatability is stated in each description. consequentialHint stays
+ * false because changing this swatch is harmless. */
 (function () {
   "use strict";
   var G = typeof window !== "undefined" ? window : globalThis;
@@ -17,6 +22,36 @@
     violet: "#ee82ee", magenta: "#ff00ff", pink: "#ffc0cb", hotpink: "#ff69b4", coral: "#ff7f50", tomato: "#ff6347",
     salmon: "#fa8072", brown: "#a52a2a", chocolate: "#d2691e", tan: "#d2b48c", beige: "#f5f5dc", rebeccapurple: "#663399" };
   var HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+  var COLOR_NAMES = Object.keys(NAMED);
+  var HEX_PATTERN = "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$";
+  var COLOR_EXAMPLE = "#3366ff";
+  // Listed in the schema itself so an assistant can see the names before a failed call.
+  var COLOR_HELP = "A hex color (#rgb or #rrggbb, for example " + COLOR_EXAMPLE + ") or one of these CSS color names: " + COLOR_NAMES.join(", ") + ".";
+  var SWATCH_SCHEMA = {
+    type: "object", additionalProperties: false, required: ["color", "name", "isDefault"],
+    properties: {
+      color: { type: "string", description: "The hex color on the swatch." },
+      name: { anyOf: [{ type: "string" }, { type: "null" }], description: "The CSS color name when one was used. Null for a hex value." },
+      isDefault: { type: "boolean", description: "True when the swatch is the starting color." }
+    }
+  };
+  // Success and error are separate so an inspector can show both shapes.
+  var COLOR_OUTPUT = {
+    oneOf: [
+      { type: "object", additionalProperties: false, required: ["ok", "message", "swatch"],
+        properties: {
+          ok: { type: "boolean", enum: [true] },
+          message: { type: "string", description: "A short sentence when the call worked." },
+          swatch: SWATCH_SCHEMA
+        } },
+      { type: "object", additionalProperties: false, required: ["ok", "error"],
+        properties: {
+          ok: { type: "boolean", enum: [false] },
+          error: { type: "string", description: "A short sentence when the call was refused." },
+          allowedNames: { type: "array", description: "The CSS color names this tool accepts.", items: { type: "string" } }
+        } }
+    ]
+  };
 
   // Returns { hex, name } or { error }. Never throws.
   function parseColor(v) {
@@ -33,15 +68,23 @@
 
   var TOOL_SPECS = [
     { name: "set_color", title: "Set the color", readOnly: false,
-      description: "Set the color of the example swatch on this page. Give a hex value such as #ff8800 or #f80, or a common CSS color name such as teal.",
+      description: "Set the color of the example swatch on this page. Use a hex value such as #3366ff or #f80, or one of the CSS color names listed in the input schema. This action is harmless and you can repeat it. Setting the same color again leaves the swatch as it is.",
       inputSchema: { type: "object", additionalProperties: false, required: ["color"],
-        properties: { color: { type: "string", maxLength: 32, description: "Hex (#rgb or #rrggbb) or a CSS color name, for example coral." } } } },
+        properties: { color: {
+          type: "string", maxLength: 32, description: COLOR_HELP, default: COLOR_EXAMPLE, examples: [COLOR_EXAMPLE],
+          // First branch carries default and examples so a manual inspector run starts at #3366ff, not "".
+          oneOf: [
+            { type: "string", title: "Hex color", description: "Hex form #rgb or #rrggbb.", pattern: HEX_PATTERN, default: COLOR_EXAMPLE, examples: [COLOR_EXAMPLE] },
+            { type: "string", title: "CSS color name", description: "One of the allowed CSS color names.", enum: COLOR_NAMES.slice() }
+          ]
+        } } },
+      outputSchema: COLOR_OUTPUT },
     { name: "get_color", title: "Read the color", readOnly: true,
-      description: "Read the current color of the example swatch. Changes nothing.",
-      inputSchema: { type: "object", additionalProperties: false, properties: {} } },
+      description: "Read the current color of the example swatch. This changes nothing and you can call it again.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: COLOR_OUTPUT },
     { name: "reset_color", title: "Reset the color", readOnly: false,
-      description: "Put the example swatch back to its starting color.",
-      inputSchema: { type: "object", additionalProperties: false, properties: {} } },
+      description: "Put the example swatch back to its starting color. This is harmless and you can repeat it. Calling it again stays on the starting color.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: COLOR_OUTPUT },
   ];
 
   function checkInput(spec, input) {
@@ -78,11 +121,17 @@
         return r.result;
       } };
   }
-  // WebMCP tool shape: { name, title, description, inputSchema, annotations, execute(input) -> Promise }.
+  // WebMCP tool shape. outputSchema is included for inspectors and newer Chrome. Chrome 157 accepts it and
+  // then omits it from getTools(). Annotations use only the four fields Chrome returns.
+  function annotationsFor(spec) {
+    return { readOnlyHint: !!spec.readOnly, consequentialHint: false, untrustedContentHint: false, debugging: false };
+  }
   function toolList(ctl, source) {
     return TOOL_SPECS.map(function (s) {
-      return { name: s.name, title: s.title, description: s.description, inputSchema: JSON.parse(JSON.stringify(s.inputSchema)),
-        annotations: { readOnlyHint: s.readOnly },
+      return { name: s.name, title: s.title, description: s.description,
+        inputSchema: JSON.parse(JSON.stringify(s.inputSchema)),
+        outputSchema: JSON.parse(JSON.stringify(s.outputSchema)),
+        annotations: annotationsFor(s),
         execute: function (input) { return Promise.resolve(ctl.call(s.name, input, source)); } };
     });
   }
@@ -109,7 +158,8 @@
     });
   }
 
-  G.__btwColor = { DEFAULT: DEFAULT, NAMED: NAMED, TOOL_SPECS: TOOL_SPECS, parseColor: parseColor, runTool: runTool,
+  G.__btwColor = { DEFAULT: DEFAULT, NAMED: NAMED, COLOR_NAMES: COLOR_NAMES, HEX_PATTERN: HEX_PATTERN, COLOR_EXAMPLE: COLOR_EXAMPLE,
+    TOOL_SPECS: TOOL_SPECS, parseColor: parseColor, runTool: runTool, annotationsFor: annotationsFor,
     createController: createController, toolList: toolList, findModelContext: findModelContext, registerWebMCP: registerWebMCP };
   if (!HAS_DOM) return;
 

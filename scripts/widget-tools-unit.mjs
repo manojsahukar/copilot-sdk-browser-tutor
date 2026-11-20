@@ -29,6 +29,37 @@ await ok("every tool: WebMCP-valid name, description, object schema with additio
   for (const t of C.TOOL_SPECS) { assert.match(t.name, /^[A-Za-z0-9_.-]{1,128}$/); assert.ok(t.description.length > 20); assert.equal(t.inputSchema.type, "object"); assert.equal(t.inputSchema.additionalProperties, false); }
 });
 await ok("only get_color is read-only", () => deq(C.TOOL_SPECS.filter((t) => t.readOnly).map((t) => t.name), ["get_color"]));
+await ok("31 CSS color names are listed in set_color inputSchema", () => {
+  assert.equal(C.COLOR_NAMES.length, 31);
+  const color = C.TOOL_SPECS[0].inputSchema.properties.color;
+  assert.equal(color.examples[0], "#3366ff");
+  assert.equal(color.default, "#3366ff");
+  assert.equal(color.oneOf[0].examples[0], "#3366ff");
+  assert.equal(color.oneOf[0].default, "#3366ff");
+  assert.equal(color.oneOf[0].pattern, C.HEX_PATTERN);
+  assert.deepEqual(color.oneOf[1].enum, C.COLOR_NAMES);
+  for (const name of C.COLOR_NAMES) assert.ok(color.description.includes(name), name);
+  assert.match(color.description, /#rgb or #rrggbb/);
+});
+await ok("every color tool has an outputSchema for success and error", () => {
+  for (const t of C.TOOL_SPECS) {
+    assert.equal(t.outputSchema.oneOf.length, 2);
+    deq(t.outputSchema.oneOf[0].required, ["ok", "message", "swatch"]);
+    assert.ok(t.outputSchema.oneOf[1].properties.error);
+    assert.ok(t.outputSchema.oneOf[1].properties.allowedNames);
+  }
+});
+await ok("annotations are explicit and repeatability is written in the description", () => {
+  for (const t of C.TOOL_SPECS) {
+    const a = C.annotationsFor(t);
+    assert.equal(a.readOnlyHint, t.readOnly);
+    assert.equal(a.consequentialHint, false);
+    assert.equal(a.untrustedContentHint, false);
+    assert.equal(a.debugging, false);
+    assert.match(t.description, /again|repeat/i);
+    assert.doesNotMatch(t.description, /[;—]/);
+  }
+});
 
 console.log("Color tools: strict validation (bad input changes nothing)");
 const s0 = { hex: C.DEFAULT, name: null };
@@ -64,11 +95,41 @@ await ok("controller: onChange fires with the source; failed calls do not change
   ctl.call("set_color", { color: "nope" }, "X"); assert.equal(seen.length, 0);
   ctl.call("set_color", { color: "red" }, "Chat widget"); deq(seen, [["#ff0000", "Chat widget", "set_color"]]);
 });
+// Same order the WebMCP inspector uses: const, oneOf[0], default, examples[0], enum[0], else "".
+function inspectorTemplate(schema) {
+  if (!schema || typeof schema !== "object") return null;
+  if (Object.prototype.hasOwnProperty.call(schema, "const")) return schema.const;
+  if (Array.isArray(schema.oneOf) && schema.oneOf.length) return inspectorTemplate(schema.oneOf[0]);
+  if (Object.prototype.hasOwnProperty.call(schema, "default")) return schema.default;
+  if (Array.isArray(schema.examples) && schema.examples.length) return schema.examples[0];
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  if (schema.type === "object") {
+    const obj = {};
+    for (const key of Object.keys(schema.properties || {})) obj[key] = inspectorTemplate(schema.properties[key]);
+    return obj;
+  }
+  if (schema.type === "string") return "";
+  if (schema.type === "boolean") return false;
+  if (schema.type === "number" || schema.type === "integer") return 0;
+  if (schema.type === "array") return [];
+  return null;
+}
+await ok("inspector template for set_color is #3366ff and that call succeeds", () => {
+  const input = inspectorTemplate(C.TOOL_SPECS[0].inputSchema);
+  deq(input, { color: "#3366ff" });
+  const r = C.runTool(s0, "set_color", input);
+  assert.equal(r.result.ok, true); assert.equal(r.state.hex, "#3366ff");
+  assert.equal(C.runTool(s0, "set_color", { color: "" }).result.ok, false);
+});
 await ok("toolList: WebMCP shape; execute returns a Promise; schema copies cannot widen the rules", async () => {
   const ctl = C.createController(); const list = C.toolList(ctl, "T");
-  for (const t of list) deq(Object.keys(t).sort(), ["annotations", "description", "execute", "inputSchema", "name", "title"]);
+  for (const t of list) deq(Object.keys(t).sort(), ["annotations", "description", "execute", "inputSchema", "name", "outputSchema", "title"]);
+  assert.equal(list[1].annotations.readOnlyHint, true);
+  assert.equal(list[0].annotations.consequentialHint, false);
   assert.equal((await list[0].execute({ color: "navy" })).ok, true); assert.equal(ctl.getState().hex, "#000080");
   list[0].inputSchema.properties.color.maxLength = 9999; assert.equal(C.runTool(s0, "set_color", { color: "x".repeat(40) }).result.ok, false);
+  list[0].inputSchema.properties.color.examples[0] = "nope";
+  assert.equal(C.TOOL_SPECS[0].inputSchema.properties.color.examples[0], "#3366ff");
 });
 
 console.log("WebMCP registration (stubbed modelContext)");
@@ -92,6 +153,9 @@ await ok("no modelContext -> 'unavailable', nothing thrown", async () => {
 await ok("document.modelContext: registers 3 tools with an AbortSignal; executeTool runs the same validated tool", async () => {
   const s = stubMC(); const ctl = C.createController(); const r = await C.registerWebMCP({ modelContext: s.mc }, ctl);
   assert.equal(r.status, "registered"); deq([...r.names].sort(), [...NAMES].sort()); assert.ok(s.opts.every((o) => o && o.signal));
+  assert.equal(s.reg.get("get_color").annotations.readOnlyHint, true);
+  assert.equal(s.reg.get("set_color").annotations.consequentialHint, false);
+  assert.ok(s.reg.get("set_color").outputSchema.oneOf[0].properties.swatch);
   const t = (await s.mc.getTools()).find((x) => x.name === "set_color");
   assert.equal(JSON.parse(await s.mc.executeTool(t, { color: "#00ff00" })).ok, true); assert.equal(ctl.getState().hex, "#00ff00");
   assert.equal(JSON.parse(await s.mc.executeTool(t, { color: "javascript:x" })).ok, false); assert.equal(ctl.getState().hex, "#00ff00");
@@ -119,9 +183,35 @@ await ok("pageToolset: OpenAI 'tools' format; skips bad names, duplicates, non-f
   const ts = W.pageToolset(list);
   assert.equal(ts.defs.length, 16); assert.equal(ts.defs[0].type, "function"); assert.equal(ts.defs[0].function.name, "a_b");
   deq(plain(ts.defs[0].function.parameters), { type: "object", properties: {} });
+  assert.equal(ts.defs[0].function.outputSchema, undefined);
+  assert.equal(ts.defs[0].function.annotations, undefined);
   assert.ok(!ts.defs.some((d) => /\s/.test(d.function.name)));
   assert.equal(Object.getPrototypeOf(ts.byName), null, "lookup table has no prototype");
   assert.equal(W.pageToolset(undefined).defs.length, 0); assert.equal(W.pageToolset({}).defs.length, 0);
+});
+const BANNED = ["examples", "default", "oneOf", "anyOf", "allOf", "$schema", "title"];
+function walkBanned(node, path) {
+  if (!node || typeof node !== "object") return;
+  for (const k of Object.keys(node)) {
+    assert.equal(BANNED.includes(k), false, path + "." + k);
+    walkBanned(node[k], path + "." + k);
+  }
+}
+await ok("llmParameters keeps the color names and drops inspector-only keywords", () => {
+  const raw = C.toolList(C.createController(), "T")[0];
+  const before = JSON.stringify(raw.inputSchema);
+  const params = W.llmParameters(raw.inputSchema);
+  assert.equal(JSON.stringify(raw.inputSchema), before, "source schema is not mutated");
+  walkBanned(params, "$");
+  assert.equal(params.additionalProperties, false);
+  assert.equal(params.properties.color.maxLength, 32);
+  assert.equal(params.properties.color.pattern, undefined);
+  assert.equal(params.properties.color.enum, undefined);
+  for (const name of C.COLOR_NAMES) assert.ok(params.properties.color.description.includes(name), name);
+  const sent = W.pageToolset([raw]).defs[0].function;
+  walkBanned(sent.parameters, "$");
+  assert.equal(sent.outputSchema, undefined);
+  assert.equal("annotations" in sent, false);
 });
 await ok("parseToolArgs: object only, size-capped, never evaluated", () => {
   deq(plain(W.parseToolArgs('{"type":"line"}').value), { type: "line" });
