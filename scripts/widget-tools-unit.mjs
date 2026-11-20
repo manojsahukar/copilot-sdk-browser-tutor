@@ -38,8 +38,12 @@ await ok("31 CSS color names are listed in set_color inputSchema", () => {
   assert.equal(color.oneOf[0].default, "#3366ff");
   assert.equal(color.oneOf[0].pattern, C.HEX_PATTERN);
   assert.deepEqual(color.oneOf[1].enum, C.COLOR_NAMES);
-  for (const name of C.COLOR_NAMES) assert.ok(color.description.includes(name), name);
+  assert.ok(color.description.length < 150, "color description is " + color.description.length + " characters");
+  assert.equal(color.description.includes("rebeccapurple"), false);
+  assert.ok(color.oneOf[0].description.length < 150);
+  assert.ok(color.oneOf[1].description.length < 150);
   assert.match(color.description, /#rgb or #rrggbb/);
+  assert.match(color.description, /allowed list/);
   assert.match(color.description, /#3366ff is only a sample/);
   assert.match(color.description, /The swatch starts at #1f6feb/);
   for (const t of C.TOOL_SPECS) assert.match(t.description, /It returns/);
@@ -82,7 +86,7 @@ const bad = [
 for (const [name, input, re] of bad) await ok(`rejects ${name} ${JSON.stringify(input).slice(0, 50)}`, () => {
   const r = C.runTool(s0, name, input); assert.equal(r.result.ok, false); assert.match(r.result.error, re); deq(r.state, s0);
 });
-await ok("an invalid name lists the allowed names", () => assert.ok(C.runTool(s0, "set_color", { color: "blurple" }).result.allowedNames.includes("teal")));
+await ok("an invalid name lists the allowed names", () => assert.deepEqual(C.runTool(s0, "set_color", { color: "blurple" }).result.allowedNames, C.COLOR_NAMES));
 await ok("prototype keys are not accepted as fields", () => assert.match(C.runTool(s0, "reset_color", JSON.parse('{"__proto__":{"x":1}}')).result.error, /Unknown input field/));
 
 console.log("Color tools: valid calls");
@@ -203,7 +207,7 @@ function walkBanned(node, path) {
     walkBanned(node[k], path + "." + k);
   }
 }
-await ok("llmParameters keeps the color names and drops inspector-only keywords", () => {
+await ok("llmParameters keeps a short color description and drops inspector-only keywords", () => {
   const raw = C.toolList(C.createController(), "T")[0];
   const before = JSON.stringify(raw.inputSchema);
   const params = W.llmParameters(raw.inputSchema);
@@ -213,7 +217,9 @@ await ok("llmParameters keeps the color names and drops inspector-only keywords"
   assert.equal(params.properties.color.maxLength, 32);
   assert.equal(params.properties.color.pattern, undefined);
   assert.equal(params.properties.color.enum, undefined);
-  for (const name of C.COLOR_NAMES) assert.ok(params.properties.color.description.includes(name), name);
+  assert.ok(params.properties.color.description.length < 150);
+  assert.equal(params.properties.color.description.includes("rebeccapurple"), false);
+  assert.deepEqual(raw.inputSchema.properties.color.oneOf[1].enum, C.COLOR_NAMES);
   const sent = W.pageToolset([raw]).defs[0].function;
   walkBanned(sent.parameters, "$");
   assert.equal(sent.outputSchema, undefined);

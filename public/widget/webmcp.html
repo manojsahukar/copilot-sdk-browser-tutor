@@ -24,7 +24,7 @@
 <p>The architecture page also offers <code>get_architecture_guide</code>. It describes the four diagrams. You can pass req, auth, loop, or trust. Omit the section to get all four. It returns the title and summary of each diagram.</p>
 <p>The live demos page also offers <code>get_demo_catalog</code> and <code>read_demo_state</code>. The catalog is a fixed list. Omit the demo code to list all of them. The state tool says whether a demo is on the page and whether a result is on screen. It does not return that text. While the list is still loading, the state says so. The script injection lab counts as on the page.</p>
 <p>The widget docs pages also offer <code>get_page_guide</code>. It returns the headings and the links on the page you are reading.</p>
-<p>The widget home page also offers <code>set_color</code>, <code>get_color</code>, and <code>reset_color</code>. They change or read the example color on that page and nothing else. The swatch starts at #1f6feb. #3366ff is only a sample in the tool form. Each tool returns the color now on the swatch.</p>
+<p>The widget home page also offers <code>set_color</code>, <code>get_color</code>, and <code>reset_color</code>. They change or read the example color on that page and nothing else. The swatch starts at #1f6feb. #3366ff is only a sample in the tool form. Each tool returns the color now on the swatch. The color field description is short. The allowed color names stay in the schema list. A bad color returns an error, and that error includes the allowed names.</p>
 
 <h2>One tool definition, two callers</h2>
 <p>Each tool is written once. WebMCP registers that same object with <code>document.modelContext.registerTool</code>.</p>

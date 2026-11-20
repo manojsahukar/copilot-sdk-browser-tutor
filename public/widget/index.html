@@ -24,7 +24,7 @@
 </div>
 <h2>How the tool call works</h2>
 <ol class="steps">
-<li>This page defines three tools in JavaScript: <code>set_color</code>, <code>get_color</code> and <code>reset_color</code>. Each tool has a name, a short description, a JSON schema for its input, and a schema for the result. <code>set_color</code> lists the hex form and the allowed color names in that input schema.</li>
+<li>This page defines three tools in JavaScript: <code>set_color</code>, <code>get_color</code> and <code>reset_color</code>. Each tool has a name, a short description, a JSON schema for its input, and a schema for the result. <code>set_color</code> lists the hex form and the allowed color names in that input schema. The color field description is short. The names stay in the schema list.</li>
 <li>When you send a message, the widget sends the tool list to OpenRouter together with your question.</li>
 <li>If the model wants to change the color, it replies with a tool call. A tool call is a tool name and its arguments in JSON.</li>
 <li>The widget runs the tool in your browser, and the color changes. The chat shows the tool name, the arguments and the result.</li>
@@ -38,7 +38,7 @@
 <p id="webmcp-status" class="callout">Your browser does not support WebMCP, so only the chat widget can use these tools. The rest of the page works as usual. To try WebMCP, use Chrome 146 or later. Open <code>chrome://flags/#enable-webmcp-testing</code>, set it to Enabled, and relaunch Chrome. Then open this page with an agent that supports WebMCP, for example the Model Context Tool Inspector extension from Chrome.</p>
 <h2>The safety rule</h2>
 <p>The tools can change only the color on this page. They cannot read your key, send data or run code.</p>
-<p>The color must be a hex value or a name from a fixed list of 31 CSS color names. That list is part of the tool input, so an assistant can read it before calling the tool. If the input is not valid, the tool returns an error and changes nothing.</p>
+<p>The color must be a hex value or a name from a fixed list of 31 CSS color names. That list stays in the tool input schema. The field description stays short. An assistant can read the names from the schema before calling the tool. If the input is not valid, the tool returns an error and the allowed names, and changes nothing.</p>
 <p>The page never runs code that the model writes. The model can only choose a tool from the list and give its arguments.</p>
 <p>The chat shows each tool call as plain text, not as HTML. A tool result cannot add a script to the page.</p>
 <h2>Security model</h2>

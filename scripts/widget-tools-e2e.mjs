@@ -14,7 +14,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let fail = 0;
 const must = (cond, msg) => { if (!cond) { fail++; console.log("  FAIL -", msg); } else console.log("  ok -", msg); };
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, authorization, http-referer, x-title", "Access-Control-Allow-Methods": "POST, OPTIONS" };
-const C_NAMES = ["black", "white", "gray", "silver", "red", "maroon", "orange", "gold", "yellow", "olive", "lime", "green", "teal", "cyan", "skyblue", "blue", "navy", "indigo", "purple", "violet", "magenta", "pink", "hotpink", "coral", "tomato", "salmon", "brown", "chocolate", "tan", "beige", "rebeccapurple"];
 const tc = (id, name, args) => ({ id, type: "function", function: { name, arguments: JSON.stringify(args) } });
 
 function watch(p) {
@@ -74,7 +73,7 @@ must(bodies.length === 2, "two requests: tool round + final answer (got " + bodi
 must(bodies.every((x) => Array.isArray(x.tools) && x.tools.length === 5 && x.stream === false), "every request carries the 5 tools, non-streaming");
 const colorFn = bodies[0].tools.find((t) => t.function.name === "set_color").function;
 must(!JSON.stringify(colorFn).includes("examples") && !JSON.stringify(colorFn).includes("oneOf") && colorFn.outputSchema === undefined, "OpenRouter payload drops inspector keywords and outputSchema");
-must(C_NAMES.every((n) => colorFn.parameters.properties.color.description.includes(n)), "OpenRouter color description still lists every allowed name");
+must(colorFn.parameters.properties.color.description.length < 150 && !colorFn.parameters.properties.color.description.includes("rebeccapurple"), "OpenRouter color description stays under 150 characters and does not list every name");
 must(/page offers tools/.test(bodies[0].messages[0].content), "system prompt includes the tool rule");
 const tail = bodies[1].messages.slice(-3);
 must(tail[0].role === "assistant" && tail[0].tool_calls.length === 2 && tail[1].tool_call_id === "call_a" && JSON.parse(tail[1].content).ok === true && JSON.parse(tail[2].content).ok === false,

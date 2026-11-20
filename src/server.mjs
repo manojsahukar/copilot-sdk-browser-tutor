@@ -18,6 +18,7 @@ import { validateSpec } from "./widgets.mjs";
 import { resolveData, recordTurn, recordWeb, userHash, setUserKey, METRICS, ENDPOINTS } from "./metrics.mjs";
 import { readiness } from "./health.mjs";
 import { parseAllowList, isLoginAllowed } from "./logins.mjs";
+import { robotsTxt, sitemapXml, llmsTxt } from "./publicmeta.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "..", "public");
@@ -165,6 +166,20 @@ function metricsRateOk(sid, max = 240) {
 const WIDGET_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://openrouter.ai https://huggingface.co https://router.huggingface.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const EVAL_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const turnLog = new Map();
+// Signed-in routes only. Unknown paths must not reach this list: they are 404 for everyone.
+const AUTH_PATHS = new Set([
+  "/api/me",
+  "/api/provider",
+  "/api/openrouter/disconnect",
+  "/api/metrics/widget",
+  "/api/metrics/catalog",
+  "/api/metrics/web",
+  "/api/chat",
+]);
+const requiresAuth = (pathname) => AUTH_PATHS.has(pathname);
+const ROBOTS_TXT = robotsTxt();
+const SITEMAP_XML = sitemapXml();
+const LLMS_TXT = llmsTxt();
 function rateOk(sid) {
   const now = Date.now(); const arr = (turnLog.get(sid) || []).filter((t) => now - t < 3600e3);
   if (arr.length >= cfg.maxTurnsPerHour) return false;
@@ -253,6 +268,10 @@ async function handle(req, res) {
     return res.end();
   }
   if (p === "/favicon.ico") { res.writeHead(204); return res.end(); }
+  // Public discovery files. No sign-in. send() still applies the security headers.
+  if (p === "/robots.txt") return send(res, 200, ROBOTS_TXT, "text/plain; charset=utf-8");
+  if (p === "/sitemap.xml") return send(res, 200, SITEMAP_XML, "application/xml; charset=utf-8");
+  if (p === "/llms.txt") return send(res, 200, LLMS_TXT, "text/plain; charset=utf-8");
 
   if (p === "/") return serveStatic(res, sess ? "app.html" : "index.html");
   if (p === "/gotchas" || p === "/gotchas/") return serveStatic(res, "gotchas.html");
@@ -359,7 +378,9 @@ async function handle(req, res) {
     return send(res, 200, { labUrl: cfg.labUrl || null, token: cfg.labUrl ? signLabToken(KEY, sess.login) : null });
   }
 
-  if (!sess) return send(res, 401, { error: "sign in first" });
+  // 401 only for routes that exist and need a session. A missing path is a small plain 404.
+  if (!sess && requiresAuth(p)) return send(res, 401, { error: "sign in first" });
+  if (!sess) return send(res, 404, "Not found\n", "text/plain; charset=utf-8");
   if (p === "/api/me") return send(res, 200, {
     login: sess.login, name: sess.name, avatar: sess.avatar, dev: !!sess.dev,
     provider: sess.provider === "openrouter" && sess.or ? "openrouter" : "copilot",
@@ -487,7 +508,7 @@ async function handle(req, res) {
     }
     return res.end();
   }
-  send(res, 404, { error: "not found" });
+  send(res, 404, "Not found\n", "text/plain; charset=utf-8");
 }
 
 // Gotcha 10: turn raw Copilot / OpenRouter / auth failures into specific, friendly guidance.

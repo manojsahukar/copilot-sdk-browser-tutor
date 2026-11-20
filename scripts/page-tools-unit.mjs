@@ -5,10 +5,12 @@ import vm from "node:vm";
 import fs from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { webcrypto } from "node:crypto";
 import { ATLAS_EVAL } from "../src/atlas.mjs";
 import { GOTCHAS } from "../src/gotchas.mjs";
+import { llmsTxt, publicPages, robotsTxt, sitemapXml, webmcpTools } from "../src/publicmeta.mjs";
 
 const load = (rel) => {
   const ctx = { console, URL, AbortController, TextEncoder, TextDecoder, crypto: webcrypto,
@@ -339,12 +341,16 @@ await ok("the lab card is detectable and the sandbox comment explains the cross-
 await ok("signed-out /api/lab returns a null token before the sign-in gate", () => {
   const src = fs.readFileSync(new URL("../src/server.mjs", import.meta.url), "utf8");
   const lab = src.indexOf('p === "/api/lab"');
-  const gate = src.indexOf('if (!sess) return send(res, 401');
-  assert.ok(lab > 0 && lab < gate);
+  const gate = src.indexOf("requiresAuth(p)");
+  assert.ok(lab > 0 && gate > lab);
   assert.equal(src.split('p === "/api/lab"').length - 1, 1);
   const signedOut = src.slice(lab, src.indexOf("signLabToken", lab));
   assert.match(signedOut, /!sess/);
   assert.match(signedOut, /token:\s*null/);
+  assert.match(src, /if \(!sess && requiresAuth\(p\)\) return send\(res, 401, \{ error: "sign in first" \}\)/);
+  assert.ok(src.indexOf('p === "/robots.txt"') < gate);
+  assert.ok(src.indexOf('p === "/sitemap.xml"') < gate);
+  assert.ok(src.indexOf('p === "/llms.txt"') < gate);
 });
 await ok("the page-tools guide matches the tools and says Chrome 156 drops outputSchema", () => {
   const html = fs.readFileSync(new URL("../public/widget/webmcp.html", import.meta.url), "utf8");
@@ -354,6 +360,8 @@ await ok("the page-tools guide matches the tools and says Chrome 156 drops outpu
   assert.match(html, /Chrome 156 does not pass <code>outputSchema<\/code> on/);
   assert.match(html, /#1f6feb/);
   assert.match(html, /#3366ff is only a sample/);
+  assert.match(html, /color field description is short/);
+  assert.match(html, /allowed names/);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)/i);
   assert.doesNotMatch(html, /\sstyle=/i);
 });
@@ -381,6 +389,127 @@ await ok("every public page loads page-tools.js and has no inline script, handle
     assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)/i, file);
     assert.doesNotMatch(html, /\son[a-z]+=/i, file);
     assert.doesNotMatch(html, /\sstyle=/i, file);
+  }
+});
+
+console.log("Public discovery files");
+const PUBLIC_PATHS = ["/", "/gotchas", "/architecture", "/demos", "/widget/", "/widget/webmcp.html", "/widget/storage.html", "/widget/xss.html", "/widget/openrouter.html", "/widget/privacy.html"];
+await ok("sitemap and llms.txt come from the public page list and the real tool registrations", () => {
+  const pages = publicPages();
+  assert.deepEqual(pages.map((p) => p.path), PUBLIC_PATHS);
+  assert.equal(pages.some((p) => /chrome-eval/i.test(p.path)), false);
+  const map = sitemapXml();
+  assert.match(map, /<\?xml version="1\.0" encoding="UTF-8"\?>/);
+  assert.equal(map.match(/<loc>/g).length, PUBLIC_PATHS.length);
+  for (const p of PUBLIC_PATHS) assert.ok(map.includes("https://copilot-sdk.demo.curiosta.com" + (p === "/" ? "/" : p)), p);
+  assert.equal(map.includes("chrome-eval"), false);
+  const robots = robotsTxt();
+  assert.match(robots, /Allow: \/\nDisallow: \/api\//);
+  assert.match(robots, /Sitemap: https:\/\/copilot-sdk\.demo\.curiosta\.com\/sitemap\.xml/);
+  const llms = llmsTxt();
+  assert.match(llms, /^# Browser Tutor\n\n> This site shows what your browser tells a website/);
+  for (const p of PUBLIC_PATHS) assert.ok(llms.includes("https://copilot-sdk.demo.curiosta.com" + (p === "/" ? "/" : p)), p);
+  const tools = webmcpTools();
+  assert.ok(tools.length >= 14);
+  for (const t of tools) {
+    assert.match(t.line, /\w/);
+    assert.ok(llms.includes(t.name), t.name);
+    assert.ok(llms.includes(t.line), t.name);
+  }
+  for (const name of ["get_site_guide", "get_landing_guide", "set_color", "get_color", "reset_color", "lookup_gotcha"]) assert.ok(tools.some((t) => t.name === name), name);
+});
+
+await ok("missing paths are 404, protected routes stay 401, and discovery files need no auth", async () => {
+  const port = 18765;
+  const base = `http://127.0.0.1:${port}`;
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  let log = "";
+  const child = spawn(process.execPath, ["src/server.mjs"], {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      HOST: "127.0.0.1",
+      PORT: String(port),
+      BASE_URL: base,
+      NODE_ENV: "test",
+      SESSION_SECRET: "unit-test-session-secret-0123456789abcdef",
+      DEV_AUTH_BYPASS: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.on("data", (d) => { log += d; });
+  child.stderr.on("data", (d) => { log += d; });
+  const stop = () => { if (!child.killed) child.kill("SIGTERM"); };
+  try {
+    const deadline = Date.now() + 8000;
+    let up = false;
+    while (Date.now() < deadline) {
+      if (child.exitCode != null) throw new Error("server exited\n" + log);
+      try {
+        const health = await fetch(base + "/healthz");
+        if (health.status === 200) { up = true; break; }
+      } catch { /* still starting */ }
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    if (!up) throw new Error("server did not listen\n" + log);
+    const headersOf = (res) => {
+      assert.match(res.headers.get("content-security-policy") || "", /default-src/);
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+      assert.equal(res.headers.get("referrer-policy"), "same-origin");
+    };
+    const missing = await fetch(base + "/this-page-does-not-exist");
+    headersOf(missing);
+    assert.equal(missing.status, 404);
+    assert.match(missing.headers.get("content-type") || "", /^text\/plain/);
+    const missingBody = await missing.text();
+    assert.ok(missingBody.length < 80, missingBody);
+    assert.match(missingBody, /^Not found\s*$/);
+    const typo = await fetch(base + "/robot.txt");
+    assert.equal(typo.status, 404);
+    assert.match(await typo.text(), /^Not found\s*$/);
+    const unknownApi = await fetch(base + "/api/not-a-real-route");
+    assert.equal(unknownApi.status, 404);
+    const me = await fetch(base + "/api/me");
+    headersOf(me);
+    assert.equal(me.status, 401);
+    assert.deepEqual(await me.json(), { error: "sign in first" });
+    const chat = await fetch(base + "/api/chat", { method: "POST", headers: { "Content-Type": "application/json", Origin: base }, body: "{}" });
+    assert.equal(chat.status, 401);
+    assert.deepEqual(await chat.json(), { error: "sign in first" });
+    const lab = await fetch(base + "/api/lab");
+    headersOf(lab);
+    assert.equal(lab.status, 200);
+    assert.deepEqual(await lab.json(), { token: null });
+    const robots = await fetch(base + "/robots.txt");
+    headersOf(robots);
+    assert.equal(robots.status, 200);
+    assert.match(robots.headers.get("content-type") || "", /^text\/plain/);
+    assert.equal(await robots.text(), robotsTxt());
+    const sitemap = await fetch(base + "/sitemap.xml");
+    headersOf(sitemap);
+    assert.equal(sitemap.status, 200);
+    assert.match(sitemap.headers.get("content-type") || "", /^application\/xml/);
+    assert.equal(await sitemap.text(), sitemapXml());
+    const llms = await fetch(base + "/llms.txt");
+    headersOf(llms);
+    assert.equal(llms.status, 200);
+    assert.match(llms.headers.get("content-type") || "", /^text\/plain/);
+    assert.equal(await llms.text(), llmsTxt());
+    const login = await fetch(base + "/auth/dev", { method: "POST", headers: { Origin: base } });
+    assert.equal(login.status, 200);
+    const setCookie = typeof login.headers.getSetCookie === "function" ? login.headers.getSetCookie() : [login.headers.get("set-cookie")];
+    const cookie = (setCookie.find((c) => c && c.startsWith("bt_sess=")) || "").split(";")[0];
+    assert.match(cookie, /^bt_sess=/);
+    const signedMissing = await fetch(base + "/still-not-a-page", { headers: { cookie } });
+    assert.equal(signedMissing.status, 404);
+    assert.match(await signedMissing.text(), /^Not found\s*$/);
+    const signedMe = await fetch(base + "/api/me", { headers: { cookie } });
+    assert.equal(signedMe.status, 200);
+    const gotchas = await fetch(base + "/api/gotchas");
+    assert.equal(gotchas.status, 200);
+  } finally {
+    stop();
   }
 });
 
