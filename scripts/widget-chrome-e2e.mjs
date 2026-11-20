@@ -274,6 +274,33 @@ ev = await EV3.evaluate(() => ({ sup: document.getElementById("ev-support").text
 must(/not found/.test(ev.sup) && /desktop Chrome/.test(ev.sup) && ev.run, "no LanguageModel at all: tells the visitor to use desktop Chrome and keeps Run disabled");
 await EV3.close();
 
+console.log("11b) an agent color submit calls respondWith during the submit event");
+const CF = await newTab({ mobile: false });
+await CF.waitForFunction(() => window.__btwColorUI && document.getElementById("color-form"), { timeout: 15000 });
+const agentCancel = await CF.evaluate(() => {
+  document.querySelector(".cp-text").value = "#ff8800";
+  let during = false;
+  const ev = new Event("submit", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "agentInvoked", { value: true });
+  ev.respondWith = function (promise) { during = true; window.__colorReply = promise; };
+  document.getElementById("color-form").dispatchEvent(ev);
+  document.getElementById("color-confirm-no").click();
+  return window.__colorReply.then((result) => ({ during, color: document.getElementById("color-demo").dataset.color, error: result && result.error }));
+});
+must(agentCancel.during && agentCancel.color === "#1f6feb" && agentCancel.error === "Cancelled by the person", "cancel: respondWith runs during submit and the swatch stays put (" + JSON.stringify(agentCancel) + ")");
+const agentYes = await CF.evaluate(() => {
+  document.querySelector(".cp-text").value = "teal";
+  let during = false;
+  const ev = new Event("submit", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "agentInvoked", { value: true });
+  ev.respondWith = function (promise) { during = true; window.__colorReply = promise; };
+  document.getElementById("color-form").dispatchEvent(ev);
+  document.getElementById("color-confirm-yes").click();
+  return window.__colorReply.then((result) => ({ during, color: document.getElementById("color-demo").dataset.color, swatch: result && result.swatch && result.swatch.color }));
+});
+must(agentYes.during && agentYes.color === "#008080" && agentYes.swatch === "#008080", "confirm: the same promise resolves with the new color (" + JSON.stringify(agentYes) + ")");
+await CF.close();
+
 console.log("12) no off-origin request anywhere in this run");
 must(rec.bad.length === 0, "blocked off-origin requests: " + JSON.stringify(rec.bad));
 await b.close();

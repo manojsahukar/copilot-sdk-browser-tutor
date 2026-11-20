@@ -58,29 +58,35 @@ must(/chrome:\/\/flags\/#enable-webmcp-testing/.test(s1.status) && /Chrome 146/.
 must(s1.tools.join() === "set_color,get_color,reset_color,get_site_guide,get_page_guide", "window.btwPageTools exposes the color tools and the read-only guides");
 await p.click('#color-demo button[data-tool="reset_color"]'); await sleep(100);
 must(await p.evaluate(() => /You called reset_color/.test(document.querySelector(".cp-log").textContent)), "Reset button runs reset_color and logs it");
-await p.evaluate(() => {
+const asked = await p.evaluate(() => {
   document.querySelector(".cp-text").value = "#ff8800";
+  let during = false;
   const ev = new Event("submit", { bubbles: true, cancelable: true });
   Object.defineProperty(ev, "agentInvoked", { value: true });
+  ev.respondWith = function (promise) { during = true; window.__colorReply = promise; };
   document.getElementById("color-form").dispatchEvent(ev);
+  return {
+    during,
+    color: document.getElementById("color-demo").dataset.color,
+    hidden: document.getElementById("color-confirm").hidden,
+    text: document.getElementById("color-confirm-text").textContent,
+    agent: document.getElementById("color-form").hasAttribute("agentinvoked"),
+  };
 });
-const asked = await p.evaluate(() => ({
-  color: document.getElementById("color-demo").dataset.color,
-  hidden: document.getElementById("color-confirm").hidden,
-  text: document.getElementById("color-confirm-text").textContent,
-  agent: document.getElementById("color-form").hasAttribute("agentinvoked"),
-}));
-must(asked.color === "#1f6feb" && asked.hidden === false && /Confirm/.test(asked.text) && /Cancel/.test(asked.text) && asked.agent, "agent submit shows confirm and does not change the swatch");
+must(asked.during && asked.color === "#1f6feb" && asked.hidden === false && /Confirm/.test(asked.text) && /Cancel/.test(asked.text) && asked.agent, "agent submit calls respondWith during submit and does not change the swatch");
 await p.click("#color-confirm-no");
-must(await p.evaluate(() => document.getElementById("color-demo").dataset.color === "#1f6feb" && document.getElementById("color-confirm").hidden === true), "cancel leaves the swatch unchanged");
+const cancelled = await p.evaluate(() => window.__colorReply);
+must(cancelled && cancelled.error === "Cancelled by the person" && await p.evaluate(() => document.getElementById("color-demo").dataset.color === "#1f6feb" && document.getElementById("color-confirm").hidden === true), "cancel resolves Cancelled by the person and leaves the swatch unchanged");
 await p.evaluate(() => {
   document.querySelector(".cp-text").value = "teal";
   const ev = new Event("submit", { bubbles: true, cancelable: true });
   Object.defineProperty(ev, "agentInvoked", { value: true });
+  ev.respondWith = function (promise) { window.__colorReply = promise; };
   document.getElementById("color-form").dispatchEvent(ev);
 });
 await p.click("#color-confirm-yes");
-must(await p.evaluate(() => document.getElementById("color-demo").dataset.color === "#008080"), "confirm applies the assistant color");
+const confirmed = await p.evaluate(() => window.__colorReply);
+must(confirmed && confirmed.ok === true && confirmed.swatch && confirmed.swatch.color === "#008080" && await p.evaluate(() => document.getElementById("color-demo").dataset.color === "#008080"), "confirm resolves the new color and applies it");
 await p.click(".btw-fab"); await sleep(300);
 await p.evaluate(() => { document.querySelector(".btw-input").value = "Make the color teal"; window.__btwUI.submit(); });
 await p.waitForFunction(() => { const m = [...document.querySelectorAll(".btw-assistant")].pop(); return m && /now teal/.test(m.textContent); }, { timeout: 10000 });
