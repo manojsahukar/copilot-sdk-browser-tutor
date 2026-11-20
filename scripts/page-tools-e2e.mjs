@@ -55,16 +55,9 @@ const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", hea
   must(home && /Sign in to see what this browser reveals/.test(home.summary), "home summary says sign-in is needed to see the browser reveal");
   must(landing.result && landing.result.ok && landing.result.signInNeeded === true && landing.result.signedIn === false, "landing tool says sign-in is needed");
   must(r.readOnly === true && r.consequential === false && r.output === true, "landing tool is read-only with an output schema");
-  must(/3 read-only tools/.test(r.note) && /find_site_page/.test(r.note) && /get_landing_guide/.test(r.note) && !/1 read-only tools/.test(r.note), "landing note counts the read-only tools, including the search form");
+  must(/2 read-only tools/.test(r.note) && /get_landing_guide/.test(r.note) && !/find_site_page/.test(r.note) && !/1 read-only tools/.test(r.note), "landing note counts the two read-only tools");
   must(!SECRET.test(blob) && r.csp.length === 0 && bad.length === 0, "landing leaks nothing and breaks no CSP " + (bad[0] || r.csp[0] || ""));
-  await p.type("#site-find-q", "privacy");
-  await p.click('#site-find button[type="submit"]');
-  const found = await p.evaluate(() => {
-    const a = document.querySelector("#site-find-results a");
-    return { text: document.getElementById("site-find-results").textContent, href: a ? a.getAttribute("href") : "" };
-  });
-  must(/Privacy/.test(found.text) && found.href === "/widget/privacy.html", "search form lists the privacy page");
-  must((await p.evaluate(() => window.__csp || [])).length === 0, "search form does not break CSP");
+  must(await p.$("#site-find") === null, "the landing page has no search form");
   await p.close();
 }
 
@@ -161,6 +154,20 @@ for (const [url, heading] of [["/widget/", "color"], ["/widget/storage.html", "O
   must(r.result && r.result.ok && r.result.page.headings.some((h) => h.toLowerCase().includes(heading.toLowerCase())), url + " guide lists a heading (" + heading + ")");
   must(r.readOnly === true && r.consequential === false, url + " guide is read-only");
   must(!SECRET.test(blob) && (r.csp || []).length === 0 && bad.filter((x) => !/Failed to load resource/.test(x)).length === 0, url + " leaks nothing and breaks no CSP " + (bad[0] || ""));
+  if (url === "/widget/") {
+    await p.type("#site-find-q", "privacy");
+    await p.click('#site-find button[type="submit"]');
+    const found = await p.evaluate(() => {
+      const a = document.querySelector("#site-find-results a");
+      return { text: document.getElementById("site-find-results").textContent, href: a ? a.getAttribute("href") : "" };
+    });
+    must(/Privacy/.test(found.text) && found.href === "/widget/privacy.html", "widget home search form lists the privacy page");
+    must((await p.evaluate(() => window.__csp || [])).length === 0, "widget home search form does not break CSP");
+    must(/find_site_page/.test(r.note), "widget home registers the search form");
+  } else {
+    must(await p.$("#site-find") === null, url + " has no search form");
+    must(!/find_site_page/.test(r.note), url + " does not register the search form");
+  }
   await p.close();
 }
 await b.close();

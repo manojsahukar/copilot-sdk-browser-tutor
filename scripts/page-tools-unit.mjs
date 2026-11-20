@@ -397,13 +397,20 @@ await ok("every public page loads page-tools.js and has no inline script, handle
       assert.match(metaCsp[1], /script-src 'self'/, file);
     }
     assert.match(html, /rel="webmcp" href="\/\.well-known\/webmcp"/, file);
-    assert.match(html, /<form\b[^>]*\btoolname="find_site_page"[^>]*>/, file);
-    assert.match(html, new RegExp('tooldescription="' + FIND_PAGE_TOOL.description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"'), file);
-    assert.match(html, new RegExp('toolaction="' + FIND_PAGE_TOOL.toolaction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"'), file);
-    assert.match(html, /<label\b[^>]*\bfor="site-find-q"/, file);
-    assert.match(html, /<input\b[^>]*\bname="q"[^>]*\btoolparamdescription="/, file);
-    const qDesc = FIND_PAGE_TOOL.inputSchema.properties.q.description;
-    assert.ok(html.includes('toolparamdescription="' + qDesc + '"'), file);
+    const widgetHome = file.endsWith(path.join("widget", "index.html"));
+    if (widgetHome) {
+      assert.match(html, /<form\b[^>]*\btoolname="find_site_page"[^>]*>/, file);
+      assert.match(html, new RegExp('tooldescription="' + FIND_PAGE_TOOL.description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"'), file);
+      assert.match(html, new RegExp('toolaction="' + FIND_PAGE_TOOL.toolaction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"'), file);
+      assert.match(html, /<label\b[^>]*\bfor="site-find-q"/, file);
+      assert.match(html, /<input\b[^>]*\bname="q"[^>]*\btoolparamdescription="/, file);
+      const qDesc = FIND_PAGE_TOOL.inputSchema.properties.q.description;
+      assert.ok(html.includes('toolparamdescription="' + qDesc + '"'), file);
+      assert.match(html, /action="\/search"/, file);
+    } else {
+      assert.equal(html.includes('toolname="find_site_page"'), false, file);
+      assert.equal(html.includes('id="site-find"'), false, file);
+    }
   }
 });
 
@@ -433,7 +440,8 @@ await ok("sitemap and llms.txt come from the public page list and the real tool 
   }
   for (const name of ["get_site_guide", "get_landing_guide", "set_color", "get_color", "reset_color", "lookup_gotcha"]) assert.ok(tools.some((t) => t.name === name), name);
   assert.match(llms, /\/\.well-known\/webmcp/);
-  assert.match(llms, /find_site_page/);
+  assert.match(llms, /widget home page has a search form named find_site_page/);
+  assert.doesNotMatch(llms, /Every public page has a search form/);
   assert.match(llms, /set_color_form/);
   const manifest = webmcpManifest();
   assert.equal(manifest.name, "Browser Tutor");
@@ -445,7 +453,12 @@ await ok("sitemap and llms.txt come from the public page list and the real tool 
   const listed = new Map();
   for (const page of manifest.pages) {
     assert.equal(page.url, "https://copilot-sdk.demo.curiosta.com" + (page.path === "/" ? "/" : page.path));
-    assert.ok(page.tools.some((t) => t.name === "find_site_page" && t.source === "declarative" && t.annotations.readOnlyHint === true && t.annotations.changesPage === false), page.path);
+    const find = page.tools.find((t) => t.name === "find_site_page");
+    if (page.path === "/widget/") {
+      assert.ok(find && find.source === "declarative" && find.annotations.readOnlyHint === true && find.annotations.changesPage === false, page.path);
+    } else {
+      assert.equal(find, undefined, page.path);
+    }
     for (const tool of page.tools) {
       assert.equal(tool.inputSchema.type, "object");
       assert.equal(typeof tool.annotations.readOnlyHint, "boolean");
@@ -476,7 +489,7 @@ await ok("sitemap and llms.txt come from the public page list and the real tool 
   assert.equal(colorForm.description, SET_COLOR_FORM_TOOL.description);
   assert.equal(colorForm.annotations.changesPage, true);
   assert.equal(manifest.pages.find((p) => p.path === "/widget/").tools.some((t) => t.name === "set_color_form"), true);
-  assert.equal(manifest.pages.filter((p) => p.path !== "/widget/").every((p) => !p.tools.some((t) => t.name === "set_color")), true);
+  assert.equal(manifest.pages.filter((p) => p.path !== "/widget/").every((p) => !p.tools.some((t) => t.name === "set_color" || t.name === "find_site_page" || t.name === "set_color_form")), true);
   assert.equal(JSON.stringify(searchPublicPages("privacy").map((p) => p.path)), JSON.stringify(["/widget/privacy.html"]));
   assert.equal(JSON.stringify(searchPublicPages("")), "[]");
   assert.equal(P.searchPages("color").some((p) => p.path === "/widget/"), true);
@@ -615,10 +628,16 @@ await ok("missing paths are 404, protected routes stay 401, and discovery files 
     headersOf(home);
     assert.equal(home.status, 200);
     const homeHtml = await home.text();
-    assert.match(homeHtml, /toolname="find_site_page"/);
-    assert.match(homeHtml, /tooldescription="/);
-    assert.match(homeHtml, /toolaction="/);
+    assert.equal(homeHtml.includes('toolname="find_site_page"'), false);
     assert.doesNotMatch(home.headers.get("content-security-policy") || "", /unsafe-inline/);
+    const widgetHome = await fetch(base + "/widget/");
+    assert.equal(widgetHome.status, 200);
+    const widgetHtml = await widgetHome.text();
+    assert.match(widgetHtml, /toolname="find_site_page"/);
+    assert.match(widgetHtml, /toolname="set_color_form"/);
+    assert.match(widgetHtml, /action="\/search"/);
+    const gotchasPage = await fetch(base + "/gotchas");
+    assert.equal((await gotchasPage.text()).includes('toolname="find_site_page"'), false);
     const login = await fetch(base + "/auth/dev", { method: "POST", headers: { Origin: base } });
     assert.equal(login.status, 200);
     const setCookie = typeof login.headers.getSetCookie === "function" ? login.headers.getSetCookie() : [login.headers.get("set-cookie")];

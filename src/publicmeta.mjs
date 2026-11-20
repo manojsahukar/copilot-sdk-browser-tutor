@@ -161,11 +161,9 @@ function toolsForPath(pathname) {
   }
   if (pathname === "/widget/") {
     for (const spec of colorSpecs) add(manifestTool(spec, !spec.readOnly, "imperative"));
-  }
-  const find = manifestTool(FIND_PAGE_TOOL, false, "declarative");
-  find.toolaction = FIND_PAGE_TOOL.toolaction;
-  add(find);
-  if (pathname === "/widget/") {
+    const find = manifestTool(FIND_PAGE_TOOL, false, "declarative");
+    find.toolaction = FIND_PAGE_TOOL.toolaction;
+    add(find);
     const colorForm = manifestTool(SET_COLOR_FORM_TOOL, true, "declarative");
     colorForm.toolaction = SET_COLOR_FORM_TOOL.toolaction;
     add(colorForm);
@@ -254,7 +252,7 @@ export function llmsTxt() {
     "",
     "A JSON manifest of these pages and tools is at " + mdLink("/.well-known/webmcp", absoluteUrl("/.well-known/webmcp")) + ". It is built from the same list as this file. It is a discovery aid, not a formal standard.",
     "",
-    "Every public page has a search form named find_site_page. It finds a page from this list. The widget home page also has a color form named set_color_form. If an assistant submits that color form, the page asks a person to confirm before the color changes. A direct set_color or reset_color tool call still applies at once.",
+    "The widget home page has a search form named find_site_page. It finds a page from this list. The same search is at " + mdLink("/search", absoluteUrl("/search")) + ". That page also has a color form named set_color_form. If an assistant submits that color form, the page asks a person to confirm before the color changes. A direct set_color or reset_color tool call still applies at once. The other pages do not have the search form.",
     "",
     "## Pages",
     "",
